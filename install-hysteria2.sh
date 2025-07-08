@@ -19,8 +19,8 @@ KEY_PATH="/etc/hysteria/key.pem"
 apt update
 apt install -y wget curl tar openssl qrencode
 
-# 2. Получение последней версии Hysteria2 (простое определение)
-VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/apernet/hysteria/releases/latest | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$')
+# 2. Получение последней версии Hysteria2 (корректно с app/)
+VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
 # 3. Скачивание и установка Hysteria2 (бинарник, не архив!)
 wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
