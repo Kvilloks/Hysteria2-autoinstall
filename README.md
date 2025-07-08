@@ -9,7 +9,7 @@
 Run this command on your VPS (Ubuntu/Debian):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//'[...]
+curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//' /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && bash /tmp/install-hysteria2.sh
 ```
 
 - Installs the latest [Hysteria2](https://github.com/apernet/hysteria) server
@@ -70,7 +70,7 @@ This allows your computer to communicate with local devices directly, bypassing 
 Выполните на вашем сервере (Ubuntu/Debian):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//'[...]
+curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//' /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && bash /tmp/install-hysteria2.sh
 ```
 
 - Устанавливает последнюю версию [Hysteria2](https://github.com/apernet/hysteria)
