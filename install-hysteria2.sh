@@ -19,6 +19,13 @@ KEY_PATH="/etc/hysteria/key.pem"
 apt update
 apt install -y wget curl tar openssl qrencode
 
+# 1.1. Установка yq для работы с YAML
+if ! command -v yq &> /dev/null; then
+    YQ_VERSION=$(curl -s https://api.github.com/repos/mikefarah/yq/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+    wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+    chmod +x /usr/local/bin/yq
+fi
+
 # 2. Получение последней версии Hysteria2 (корректно с app/)
 VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
@@ -35,19 +42,36 @@ fi
 # 5. Генерация нового случайного пароля для пользователя
 NEW_PASS=$(openssl rand -base64 12)
 
-# 6. Добавление нового пароля в config.yaml
+# 6. Добавление нового пароля в config.yaml с использованием yq
 if [ -f "$CONFIG_PATH" ]; then
-  # Если уже есть файл конфигурации:
-  # - Если уже есть массив passwords: просто добавить новый пароль
-  # - Если есть только строка password:, заменить её на passwords: массив со старым и новым паролем
-  # - Если нет пароля — добавить массив с новым паролем
-  if grep -qE "passwords:" "$CONFIG_PATH"; then
-    sed -i "/passwords:/a\    - \"$NEW_PASS\"" "$CONFIG_PATH"
-  elif grep -qE "password:" "$CONFIG_PATH"; then
-    OLD_PASS=$(grep 'password:' "$CONFIG_PATH" | head -n1 | awk -F': ' '{print $2}' | tr -d '"')
-    sed -i "/password:/c\  passwords:\n    - \"$OLD_PASS\"\n    - \"$NEW_PASS\"" "$CONFIG_PATH"
+  # Проверяем, есть ли уже массив passwords
+  if yq eval '.auth.passwords' "$CONFIG_PATH" > /dev/null 2>&1 && [ "$(yq eval '.auth.passwords' "$CONFIG_PATH")" != "null" ]; then
+    # Массив passwords уже существует
+    PASSWORDS_ARRAY=$(yq eval '.auth.passwords' "$CONFIG_PATH")
+    if [ "$PASSWORDS_ARRAY" != "[]" ]; then
+      # Проверяем, нет ли уже такого пароля
+      DUPLICATE_CHECK=$(yq eval ".auth.passwords[] | select(. == \"$NEW_PASS\")" "$CONFIG_PATH" 2>/dev/null || echo "")
+      if [ -z "$DUPLICATE_CHECK" ]; then
+        # Добавляем новый пароль в массив
+        yq eval ".auth.passwords += [\"$NEW_PASS\"]" -i "$CONFIG_PATH"
+      fi
+    else
+      # Массив пустой, добавляем пароль
+      yq eval ".auth.passwords = [\"$NEW_PASS\"]" -i "$CONFIG_PATH"
+    fi
+  elif yq eval '.auth.password' "$CONFIG_PATH" > /dev/null 2>&1 && [ "$(yq eval '.auth.password' "$CONFIG_PATH")" != "null" ]; then
+    # Есть только одиночный password, преобразуем в массив
+    OLD_PASS=$(yq eval '.auth.password' "$CONFIG_PATH")
+    # Создаём массив со старым и новым паролем
+    if [ "$OLD_PASS" != "$NEW_PASS" ]; then
+      yq eval "del(.auth.password) | .auth.passwords = [\"$OLD_PASS\", \"$NEW_PASS\"]" -i "$CONFIG_PATH"
+    else
+      # Если пароли одинаковые, просто преобразуем в массив
+      yq eval "del(.auth.password) | .auth.passwords = [\"$OLD_PASS\"]" -i "$CONFIG_PATH"
+    fi
   else
-    sed -i "/auth:/a\  passwords:\n    - \"$NEW_PASS\"" "$CONFIG_PATH"
+    # Нет ни password, ни passwords - добавляем массив
+    yq eval ".auth.passwords = [\"$NEW_PASS\"]" -i "$CONFIG_PATH"
   fi
 else
   # Если конфиг отсутствует — создать новый с массивом паролей
