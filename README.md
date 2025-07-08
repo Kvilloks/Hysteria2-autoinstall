@@ -9,7 +9,7 @@
 Run this command on your VPS (Ubuntu/Debian):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//' /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && bash /tmp/install-hysteria2.sh
+curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//'[...]
 ```
 
 - Installs the latest [Hysteria2](https://github.com/apernet/hysteria) server
@@ -41,6 +41,28 @@ Use this in your [Hysteria2 client](https://github.com/apernet/hysteria#clients)
 
 ---
 
+## Access to Local Network (LAN) in TUN Mode
+
+If you use TUN mode (for example, with NekoBox or other Hysteria2 clients) and want access to your local devices (routers, printers, NAS, PCs), you must explicitly specify local IP ranges in the TUN settings in the “Bypass CIDR” field (or similar, such as “Direct List”).
+
+**Recommended ranges to add:**
+```
+192.168.0.0/16
+10.0.0.0/8
+172.16.0.0/12
+```
+
+This allows your computer to communicate with local devices directly, bypassing the VPN tunnel. If you do not add these ranges, you may lose access to local addresses when TUN mode is enabled.
+
+**Example settings in NekoBox:**
+
+![image1](image1)
+
+> **Note:**  
+> Add these ranges to the “Bypass CIDR” list and ensure “Whitelist mode” is **disabled** if you want only local networks to bypass the VPN, with all other traffic going through the tunnel.
+
+---
+
 # Русский
 
 ## Быстрая установка Hysteria2 (одной командой)
@@ -48,7 +70,7 @@ Use this in your [Hysteria2 client](https://github.com/apernet/hysteria#clients)
 Выполните на вашем сервере (Ubuntu/Debian):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//' /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && bash /tmp/install-hysteria2.sh
+curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && dos2unix /tmp/install-hysteria2.sh 2>/dev/null || sed -i 's/\r$//'[...]
 ```
 
 - Устанавливает последнюю версию [Hysteria2](https://github.com/apernet/hysteria)
@@ -77,5 +99,27 @@ hysteria2://ВАШ_ПАРОЛЬ@IP_СЕРВЕРА:443/?insecure=1
 - Конфиг: `/etc/hysteria/config.yaml`
 - Сертификат: `/etc/hysteria/cert.pem`
 - Ключ: `/etc/hysteria/key.pem`
+
+---
+
+## Доступ к локальной сети (LAN) в режиме TUN
+
+Если вы используете режим TUN (например, с NekoBox или другими клиентами Hysteria2), чтобы обеспечить доступ к локальным устройствам (роутеры, принтеры, NAS, ПК в локалке), необходимо явно указать диапазоны локальных IP-адресов в настройках TUN в поле «Пропускать CIDR» (или аналогичном, например “Bypass CIDR”, “Direct List”).
+
+**Рекомендуемые диапазоны для добавления:**
+```
+192.168.0.0/16
+10.0.0.0/8
+172.16.0.0/12
+```
+
+Это позволит компьютеру обращаться к локальным устройствам напрямую, минуя VPN-туннель. Если эти диапазоны не добавить, при активном TUN-режиме доступ к локальным адресам может быть потерян.
+
+**Пример настройки в NekoBox:**
+
+![image1](image1)
+
+> **Важно:**  
+> Включите эти диапазоны в список “Пропускать CIDR” и убедитесь, что “Режим белого списка” (Whitelist mode) ОТКЛЮЧЁН, если вы хотите пропускать только локальные сети напрямую, а весь остальной трафик отправлять через VPN.
 
 ---
