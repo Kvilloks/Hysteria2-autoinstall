@@ -5,7 +5,7 @@ set -e
 # ================================
 # Hysteria2 Multi-User Auto-Install & Add-User Script
 # by Kvilloks
-# 
+#
 # Каждый запуск скрипта добавляет нового пользователя (пароль) в конфиг Hysteria2.
 # Старые пароли и сертификаты сохраняются. Сертификат создаётся только при первом запуске.
 # Также теперь генерируется QR-код hysteria2:// для быстрого сканирования телефоном.
@@ -19,12 +19,11 @@ KEY_PATH="/etc/hysteria/key.pem"
 apt update
 apt install -y wget curl tar openssl qrencode
 
-# 2. Получение последней версии Hysteria2 (упрощённо через редирект)
+# 2. Получение последней версии Hysteria2 (простое определение)
 VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/apernet/hysteria/releases/latest | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$')
 
-# 3. Скачивание и установка Hysteria2
-wget -O /tmp/hysteria.tar.gz "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64.tar.gz"
-tar -xzf /tmp/hysteria.tar.gz -C /usr/local/bin
+# 3. Скачивание и установка Hysteria2 (бинарник, не архив!)
+wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
 chmod +x /usr/local/bin/hysteria
 
 # 4. Генерация самоподписанного сертификата, если его ещё нет
