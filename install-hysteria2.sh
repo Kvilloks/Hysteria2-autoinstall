@@ -101,7 +101,10 @@ if ! echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
   IP=$(hostname -I | awk '{print $1}')
 fi
 
-HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$IP:443/?insecure=1"
+# Кодируем логин и пароль для URI
+ENC_USER=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$NEW_USER'''))")
+ENC_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$NEW_PASS'''))")
+HYST_LINK="hysteria2://${ENC_USER}:${ENC_PASS}@${IP}:443/?insecure=1"
 
 echo "=============================="
 echo "Hysteria2 user added!"
