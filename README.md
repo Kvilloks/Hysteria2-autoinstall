@@ -18,7 +18,7 @@ curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/m
 - Automatically detects your server's external IP address using multiple services
 - Outputs ready-to-use hysteria2:// link for your client
 
-**Default masquerade: [https://www.cloudflare.com/](https://www.cloudflare.com/)**
+**Default masquerade: [https://www.bing.com/](https://www.bing.com/)**
 
 ---
 
@@ -80,7 +80,7 @@ curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/m
 - Автоматически определяет внешний IP-адрес вашего сервера, используя несколько надежных сервисов
 - Показывает готовую ссылку hysteria2:// для клиента
 
-**Маскарадинг по умолчанию: [https://www.cloudflare.com/](https://www.cloudflare.com/)**
+**Маскарадинг по умолчанию: [https://www.bing.com/](https://www.bing.com/)**
 
 ---
 
