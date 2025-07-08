@@ -7,6 +7,23 @@ CERT_PATH="/etc/hysteria/cert.pem"
 KEY_PATH="/etc/hysteria/key.pem"
 SERVICE_PATH="/etc/systemd/system/hysteria-server.service"
 
+# Улучшенное определение внешнего IP с несколькими источниками
+get_external_ip() {
+    # Попытка использовать несколько сервисов для определения внешнего IP
+    for ip_service in "https://api.ipify.org" "https://ifconfig.me" "https://icanhazip.com"; do
+        EXTERNAL_IP=$(curl -s $ip_service)
+        if [[ $EXTERNAL_IP =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$EXTERNAL_IP"
+            return 0
+        fi
+    done
+    
+    # Если не удалось определить IP автоматически, запрашиваем у пользователя
+    echo "Не удалось автоматически определить ваш внешний IP."
+    read -p "Пожалуйста, введите ваш внешний IP-адрес: " MANUAL_IP
+    echo "$MANUAL_IP"
+}
+
 # 1. Генерация нового рандомного пользователя и пароля
 NEW_USER="user$(shuf -i 1000-9999 -n 1)"
 NEW_PASS=$(openssl rand -base64 12)
@@ -95,16 +112,10 @@ else
   systemctl restart hysteria-server
 fi
 
-# Определяем внешний IP
-IP=$(curl -s https://api.ipify.org)
-if ! echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-  IP=$(hostname -I | awk '{print $1}')
-fi
+# Определяем внешний IP с улучшенной системой
+IP=$(get_external_ip)
 
-# Кодируем логин и пароль для URI
-ENC_USER=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$NEW_USER'''))")
-ENC_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$NEW_PASS'''))")
-HYST_LINK="hysteria2://${ENC_USER}:${ENC_PASS}@${IP}:443/?insecure=1"
+HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$IP:443/?insecure=1"
 
 echo "=============================="
 echo "Hysteria2 user added!"
