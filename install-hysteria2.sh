@@ -7,7 +7,8 @@ CERT_PATH="/etc/hysteria/cert.pem"
 KEY_PATH="/etc/hysteria/key.pem"
 SERVICE_PATH="/etc/systemd/system/hysteria-server.service"
 
-# 1. Генерация нового случайного пароля для пользователя
+# 1. Генерация нового логина и пароля для пользователя
+NEW_USER="user$((RANDOM%9000+1000))"
 NEW_PASS=$(openssl rand -base64 12)
 
 # 2. Проверяем наличие основного конфига — если нет, это первый запуск (установка)
@@ -33,16 +34,16 @@ if [ ! -f "$CONFIG_PATH" ]; then
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
 
-  # Создание базового config.yaml
+  # Создание базового config.yaml с userpass
   cat > "$CONFIG_PATH" <<EOF
 listen: :443
 tls:
   cert: $CERT_PATH
   key: $KEY_PATH
 auth:
-  type: password
-  passwords:
-    - "$NEW_PASS"
+  type: userpass
+  users:
+    $NEW_USER: "$NEW_PASS"
 masquerade:
   type: proxy
   proxy:
@@ -77,24 +78,16 @@ else
     chmod +x /usr/local/bin/yq
   fi
 
-  # Гарантируем что .auth.type = password
-  yq -i '.auth.type = "password"' "$CONFIG_PATH"
+  # Гарантируем что .auth.type = userpass
+  yq -i '.auth.type = "userpass"' "$CONFIG_PATH"
 
-  # Если .auth.passwords не массив — конвертируем
-  if ! yq '.auth.passwords' "$CONFIG_PATH" &>/dev/null; then
-    OLD_PASS=$(yq '.auth.password // ""' "$CONFIG_PATH")
-    if [ "$OLD_PASS" != "" ]; then
-      yq -i 'del(.auth.password)' "$CONFIG_PATH"
-      yq -i '.auth.passwords = ["'"$OLD_PASS"'"]' "$CONFIG_PATH"
-    else
-      yq -i '.auth.passwords = []' "$CONFIG_PATH"
-    fi
+  # Если .auth.users не существует — создаём
+  if ! yq '.auth.users' "$CONFIG_PATH" &>/dev/null; then
+    yq -i '.auth.users = {}' "$CONFIG_PATH"
   fi
 
-  # Добавляем новый пароль, если его ещё нет
-  if ! yq '.auth.passwords[]' "$CONFIG_PATH" | grep -Fxq "$NEW_PASS"; then
-    yq -i '.auth.passwords += ["'"$NEW_PASS"'"]' "$CONFIG_PATH"
-  fi
+  # Добавляем нового пользователя (или заменяем если такой логин уже есть)
+  yq -i '.auth.users["'"$NEW_USER"'"] = "'"$NEW_PASS"'"' "$CONFIG_PATH"
 
   # Перезапуск сервиса
   systemctl restart hysteria-server
@@ -106,12 +99,13 @@ if ! echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
   IP=$(hostname -I | awk '{print $1}')
 fi
 
-HYST_LINK="hysteria2://$NEW_PASS@$IP:443/?insecure=1"
+HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$IP:443/?insecure=1"
 
 echo "=============================="
 echo "Hysteria2 user added!"
 echo "Port: 443"
-echo "New password: $NEW_PASS"
+echo "Login: $NEW_USER"
+echo "Password: $NEW_PASS"
 echo "Certificate: $CERT_PATH"
 echo "=============================="
 echo ""
