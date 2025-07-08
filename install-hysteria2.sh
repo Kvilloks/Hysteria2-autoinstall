@@ -7,8 +7,8 @@ CERT_PATH="/etc/hysteria/cert.pem"
 KEY_PATH="/etc/hysteria/key.pem"
 SERVICE_PATH="/etc/systemd/system/hysteria-server.service"
 
-# 1. Генерация нового логина и пароля для пользователя
-NEW_USER="user$((RANDOM%9000+1000))"
+# 1. Генерация нового рандомного пользователя и пароля
+NEW_USER="user$(shuf -i 1000-9999 -n 1)"
 NEW_PASS=$(openssl rand -base64 12)
 
 # 2. Проверяем наличие основного конфига — если нет, это первый запуск (установка)
@@ -34,7 +34,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
 
-  # Создание базового config.yaml с userpass
+  # Создание базового config.yaml с userpass!
   cat > "$CONFIG_PATH" <<EOF
 listen: :443
 tls:
@@ -42,7 +42,7 @@ tls:
   key: $KEY_PATH
 auth:
   type: userpass
-  users:
+  userpass:
     $NEW_USER: "$NEW_PASS"
 masquerade:
   type: proxy
@@ -81,13 +81,15 @@ else
   # Гарантируем что .auth.type = userpass
   yq -i '.auth.type = "userpass"' "$CONFIG_PATH"
 
-  # Если .auth.users не существует — создаём
-  if ! yq '.auth.users' "$CONFIG_PATH" &>/dev/null; then
-    yq -i '.auth.users = {}' "$CONFIG_PATH"
+  # Если .auth.userpass отсутствует — создаём пустой map
+  if ! yq eval '.auth.userpass' "$CONFIG_PATH" &>/dev/null || [ "$(yq eval '.auth.userpass' "$CONFIG_PATH")" = "null" ]; then
+    yq -i '.auth.userpass = {}' "$CONFIG_PATH"
   fi
 
-  # Добавляем нового пользователя (или заменяем если такой логин уже есть)
-  yq -i '.auth.users["'"$NEW_USER"'"] = "'"$NEW_PASS"'"' "$CONFIG_PATH"
+  # Добавляем нового пользователя, если его ещё нет
+  if ! yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH" &>/dev/null || [ "$(yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH")" = "null" ]; then
+    yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
+  fi
 
   # Перезапуск сервиса
   systemctl restart hysteria-server
@@ -104,8 +106,8 @@ HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$IP:443/?insecure=1"
 echo "=============================="
 echo "Hysteria2 user added!"
 echo "Port: 443"
-echo "Login: $NEW_USER"
-echo "Password: $NEW_PASS"
+echo "New user: $NEW_USER"
+echo "New password: $NEW_PASS"
 echo "Certificate: $CERT_PATH"
 echo "=============================="
 echo ""
