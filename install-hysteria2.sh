@@ -19,22 +19,24 @@ KEY_PATH="/etc/hysteria/key.pem"
 apt update
 apt install -y wget curl tar openssl qrencode
 
-# 2. Скачивание и установка последней версии Hysteria2
-VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep tag_name | cut -d '"' -f 4)
-wget -O /tmp/hysteria.tar.gz https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64.tar.gz
+# 2. Получение последней версии Hysteria2 (упрощённо через редирект)
+VERSION=$(curl -fsSLI -o /dev/null -w '%{url_effective}' https://github.com/apernet/hysteria/releases/latest | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+$')
+
+# 3. Скачивание и установка Hysteria2
+wget -O /tmp/hysteria.tar.gz "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64.tar.gz"
 tar -xzf /tmp/hysteria.tar.gz -C /usr/local/bin
 chmod +x /usr/local/bin/hysteria
 
-# 3. Генерация самоподписанного сертификата, если его ещё нет
+# 4. Генерация самоподписанного сертификата, если его ещё нет
 if [ ! -f "$CERT_PATH" ] || [ ! -f "$KEY_PATH" ]; then
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
 fi
 
-# 4. Генерация нового случайного пароля для пользователя
+# 5. Генерация нового случайного пароля для пользователя
 NEW_PASS=$(openssl rand -base64 12)
 
-# 5. Добавление нового пароля в config.yaml
+# 6. Добавление нового пароля в config.yaml
 if [ -f "$CONFIG_PATH" ]; then
   # Если уже есть файл конфигурации:
   # - Если уже есть массив passwords: просто добавить новый пароль
@@ -65,7 +67,7 @@ masquerade:
 EOF
 fi
 
-# 6. Создание systemd-сервиса для Hysteria2 (только при первом запуске)
+# 7. Создание systemd-сервиса для Hysteria2 (только при первом запуске)
 if [ ! -f /etc/systemd/system/hysteria-server.service ]; then
 cat > /etc/systemd/system/hysteria-server.service <<EOF
 [Unit]
@@ -88,7 +90,7 @@ else
   systemctl restart hysteria-server
 fi
 
-# 7. Вывод информации о новом пользователе (пароле) и ссылке для клиента
+# 8. Вывод информации о новом пользователе (пароле) и ссылке для клиента
 IP=$(curl -s https://api.ip.sb/ip || hostname -I | awk '{print $1}')
 HYST_LINK="hysteria2://$NEW_PASS@$IP:443/?insecure=1"
 
@@ -103,7 +105,7 @@ echo "Your client URL:"
 echo "$HYST_LINK"
 echo ""
 
-# 8. Генерация QR-кода hysteria2:// ссылки прямо в терминал
+# 9. Генерация QR-кода hysteria2:// ссылки прямо в терминал
 echo "=== QR-код для мобильного клиента ==="
 qrencode -t ANSIUTF8 "$HYST_LINK"
 echo "====================================="
