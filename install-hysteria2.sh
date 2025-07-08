@@ -64,7 +64,7 @@ auth:
 masquerade:
   type: proxy
   proxy:
-    url: https://www.cloudflare.com/
+    url: https://www.bing.com/
 EOF
 
   # Создание systemd-сервиса
