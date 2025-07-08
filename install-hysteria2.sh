@@ -89,8 +89,12 @@ else
   systemctl restart hysteria-server
 fi
 
-# 8. Вывод информации о новом пользователе (пароле) и ссылке для клиента
-IP=$(curl -s https://api.ip.sb/ip || hostname -I | awk '{print $1}')
+# 8. Корректное определение внешнего IP-адреса
+IP=$(curl -s https://api.ipify.org)
+if ! echo "$IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    IP=$(hostname -I | awk '{print $1}')
+fi
+
 HYST_LINK="hysteria2://$NEW_PASS@$IP:443/?insecure=1"
 
 echo "=============================="
