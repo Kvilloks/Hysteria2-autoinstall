@@ -57,7 +57,7 @@ while true; do
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
         break
     else
-        echo "❌ Ошибка: пожалуйста введит�� число от 1 до ${#IPS[@]}"
+        echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
     fi
 done
 
@@ -102,12 +102,19 @@ if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
     INTERFACE="eth0"
 fi
 
-# --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС (Отключение TCP Timestamps) ---
+# --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
+echo "🥷 Применение глобальных сетевых настроек ядра..."
+# Отключение TCP Timestamps для маскировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
-    echo "🥷 Включение маскировки TCP/IP (отключение TCP Timestamps)..."
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
-    sysctl -w net.ipv4.tcp_timestamps=0 > /dev/null 2>&1 || true
 fi
+# Включение TCP BBR для ускорения работы SOCKS5 (снижение packet loss)
+if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+fi
+sysctl -p > /dev/null 2>&1 || true
+
 
 # Базовые пакеты
 PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2"
