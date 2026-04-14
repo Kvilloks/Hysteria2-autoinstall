@@ -146,7 +146,9 @@ else
   systemctl restart $SERVICE_NAME
 fi
 
-HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$SELECTED_IP:443/?insecure=1"
+# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: URL-encode пароль (заменяем / на %2F)
+ENCODED_PASS=$(echo "$NEW_PASS" | sed 's/\//%2F/g')
+HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
 echo ""
 echo "=============================="
@@ -159,7 +161,7 @@ echo "Пользователь: $NEW_USER"
 echo "Пароль:       $NEW_PASS"
 echo "=============================="
 echo ""
-echo "📱 Ссылка для подключения:"
+echo "��� Ссылка для подключения:"
 echo "$HYST_LINK"
 echo ""
 
