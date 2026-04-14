@@ -1,127 +1,44 @@
-# Hysteria2 Auto Install Script
+# Hysteria2 Multi-IP Installer
 
-**English | [Русский](#русский)**
+A Bash script for automated deployment of Hysteria2 proxy servers on Linux servers with multiple IP addresses. The script resolves outbound traffic routing issues and applies network-level tweaks to hide proxy usage (Anti-Detect features).
 
----
+## Features
 
-## Fast Hysteria2 Installation (One Command)
+*   **Isolated Routing:** Automatically configures `ip rule` and `ip route` (Policy Routing). This ensures that outbound traffic strictly routes through the specific IP address bound to the given Hysteria2 instance.
+*   **TCP/IP Fingerprint Spoofing:**
+    *   Modifies the outbound TTL to 128 (Windows standard) using `iptables`.
+    *   Globally disables `tcp_timestamps` via `sysctl` to hide Linux kernel markers.
+*   **Timing Analysis Protection:** Utilizes the `tc netem` kernel module to generate a unique static latency and jitter for each IP address.
+*   **Process Isolation:** Each IP address is managed by its own dedicated systemd service. Network rules are applied dynamically on service start (`ExecStartPre`) and cleanly removed on stop (`ExecStopPost`).
+*   **User Management:** Seamlessly appends new users to an existing configuration without overwriting current settings.
+*   **Architecture Support:** Compatible with x86_64 (amd64) and aarch64 (arm64).
 
-Run this command on your VPS (Ubuntu/Debian):
+## Requirements
 
-```bash
-curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && /tmp/install-hysteria2.sh
-```
+*   OS: Debian 11+ / Ubuntu 20.04+ (or derivatives).
+*   Permissions: `root` access.
+*   Network: Additional IP addresses must be pre-configured on the server's network interface prior to running the script.
 
-- Installs the latest [Hysteria2](https://github.com/apernet/hysteria) server
-- Generates a secure random password and self-signed certificate
-- Starts Hysteria2 on port 443 with password authentication
-- Automatically detects your server's external IP address using multiple services
-- Outputs ready-to-use hysteria2:// link for your client
+## Installation and Run
 
-**Default masquerade: [https://www.bing.com/](https://www.bing.com/)**
-
----
-
-## Connection Example
-
-After install, you will see a link like:
-
-```
-hysteria2://user1234:YourPassword@YOUR_IP:443/?insecure=1
-```
-
-Use this in your [Hysteria2 client](https://github.com/apernet/hysteria#clients)!
-
----
-
-## Manual config and certificate
-
-- Config path: `/etc/hysteria/config.yaml`
-- Cert path: `/etc/hysteria/cert.pem`
-- Key path: `/etc/hysteria/key.pem`
-
----
-
-## Access to Local Network (LAN) in TUN Mode
-
-If you use TUN mode (for example, with NekoBox or other Hysteria2 clients) and want access to your local devices (routers, printers, NAS, PCs), you must explicitly specify local IP ranges in the TUN settings.
-
-**Recommended ranges to add:**
-```
-192.168.0.0/16
-10.0.0.0/8
-172.16.0.0/12
-```
-
-This allows your computer to communicate with local devices directly, bypassing the VPN tunnel. If you do not add these ranges, you may lose access to local addresses when TUN mode is enabled.
-
-**Example settings in NekoBox:**
-
-![image1](image1)
-
-> **Note:**  
-> Add these ranges to the "Bypass CIDR" list and ensure "Whitelist mode" is **disabled** if you want only local networks to bypass the VPN, with all other traffic going through the tunnel.
-
----
-
-# Русский
-
-## Быстрая установка Hysteria2 (одной командой)
-
-Выполните на вашем сервере (Ubuntu/Debian):
+You can download and execute the script in a single command with root privileges:
 
 ```bash
 curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && /tmp/install-hysteria2.sh
 ```
 
-- Устанавливает последнюю версию [Hysteria2](https://github.com/apernet/hysteria)
-- Генерирует пароль и самоподписанный сертификат
-- Запускает сервер на порту 443 с авторизацией по паролю
-- Автоматически определяет внешний IP-адрес вашего сервера, используя несколько надежных сервисов
-- Показывает готовую ссылку hysteria2:// для клиента
+## Usage
 
-**Маскарадинг по умолчанию: [https://www.bing.com/](https://www.bing.com/)**
+1. Upon launch, the script will scan the network interfaces and list all available IPv4 addresses.
+2. Enter the index number corresponding to the desired IP address.
+3. The script will automatically install dependencies (e.g., `yq`, `qrencode`, `iptables`), generate an SSL certificate, and create the configuration file.
+4. Access credentials, a URI link (`hysteria2://...`), and a QR code for client configuration will be printed in the terminal.
 
----
+To add another user to an already configured IP address, run the script again and select the same IP. The script will update the configuration accordingly.
 
-## Пример подключения
+## Traffic Masking Verification
 
-После установки увидите ссылку:
-
-```
-hysteria2://user1234:ВАШ_ПАРОЛЬ@IP_СЕРВЕРА:443/?insecure=1
-```
-
-Используйте её в вашем [клиенте Hysteria2](https://github.com/apernet/hysteria#clients)!
-
----
-
-## Ручная настройка и сертификат
-
-- Конфиг: `/etc/hysteria/config.yaml`
-- Сертификат: `/etc/hysteria/cert.pem`
-- Ключ: `/etc/hysteria/key.pem`
-
----
-
-## Доступ к локальной сети (LAN) в режиме TUN
-
-Если вы используете режим TUN (например, с NekoBox или другими клиентами Hysteria2), чтобы обеспечить доступ к локальным устройствам (роутерам, принтерам, NAS, ПК), вы должны явно указать диапазоны локальных IP-адресов в настройках TUN.
-
-**Рекомендуемые диапазоны для добавления:**
-```
-192.168.0.0/16
-10.0.0.0/8
-172.16.0.0/12
-```
-
-Это позволит компьютеру обращаться к локальным устройствам напрямую, минуя VPN-туннель. Если эти диапазоны не добавить, вы можете потерять доступ к локальным адресам при включенном режиме TUN.
-
-**Пример настройки в NekoBox:**
-
-![image1](image1)
-
-> **Важно:**  
-> Включите эти диапазоны в список "Пропускать CIDR" и убедитесь, что "Режим белого списка" (Whitelist mode) ОТКЛЮЧЁН, если вы хотите, чтобы только локальные сети обходили VPN, а весь остальной трафик шел через туннель.
-
----
+You can verify the network fingerprint spoofing using traffic profilers:
+1. Connect to the proxy from your client device.
+2. Open the [BrowserLeaks IP Test](https://browserleaks.com/ip).
+3. Scroll to the **TCP/IP Fingerprint** section. The **OS Type** should identify the traffic as `Windows` or `Windows NT`, instead of Linux or Android.
