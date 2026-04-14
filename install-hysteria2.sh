@@ -82,12 +82,6 @@ KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
 SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
-# Динамически получаем имя интерфейса для конфига Hysteria
-MAIN_INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
-if [ -z "$MAIN_INTERFACE" ]; then
-    MAIN_INTERFACE="eth0"
-fi
-
 if [ ! -f "/usr/local/bin/hysteria" ]; then
   echo "📦 Установка зависимостей..."
   apt update
@@ -133,7 +127,6 @@ outbounds:
     type: direct
     direct:
       bindIPv4: $SELECTED_IP
-      bindDevice: $MAIN_INTERFACE
 acl:
   inline:
     - ip_outbound(all)
@@ -182,10 +175,10 @@ else
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
   fi
 
-  # Проверяем, есть ли уже правила для исходящего IP, если нет - добавляем (с bindIPv4 и bindDevice)
+  # Проверяем, есть ли уже правила для исходящего IP, если нет - добавляем (только bindIPv4)
   if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
     echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
-    yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'", "bindDevice": "'$MAIN_INTERFACE'"}}]' "$CONFIG_PATH"
+    yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
 
