@@ -14,16 +14,12 @@ get_all_ips() {
 
 # Функция выбора IP-адреса
 select_ip() {
-    echo "=============================="
-    echo "Доступные IP-адреса на сервере:"
-    echo "=============================="
-    
     # Получаем все IP в массив
     mapfile -t IPS < <(get_all_ips)
     
     # Если нет публичных IP, спросим вручную
     if [ ${#IPS[@]} -eq 0 ]; then
-        echo "Не найдены публичные IP-адреса."
+        echo "❌ Не найдены публичные IP-адреса."
         read -p "Введите IP-адрес вручную: " MANUAL_IP
         echo "$MANUAL_IP"
         return
@@ -31,21 +27,28 @@ select_ip() {
     
     # Показываем список IP с номерами
     echo ""
+    echo "=============================="
+    echo "Доступные IP-адреса на сервере:"
+    echo "=============================="
     for i in "${!IPS[@]}"; do
         echo "$((i+1)). ${IPS[$i]}"
     done
+    echo "=============================="
     echo ""
     
     # Спрашиваем выбор
-    read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
+    while true; do
+        read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
+        
+        # Проверяем корректность выбора
+        if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
+            break
+        else
+            echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
+        fi
+    done
     
-    # Проверяем корректность выбора
-    if ! [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] || [ "$IP_CHOICE" -lt 1 ] || [ "$IP_CHOICE" -gt ${#IPS[@]} ]; then
-        echo "❌ Ошибка: некорректный выбор!"
-        exit 1
-    fi
-    
-    # Возвращаем выбранный IP
+    # Возвращаем ТОЛЬКО выбранный IP
     echo "${IPS[$((IP_CHOICE-1))]}"
 }
 
@@ -55,8 +58,9 @@ NEW_PASS=$(openssl rand -base64 12)
 
 # Выбор IP-адреса
 SELECTED_IP=$(select_ip)
+
 echo ""
-echo "✓ Выбран IP: $SELECTED_IP"
+echo "✅ Выбран IP: $SELECTED_IP"
 echo ""
 
 # Проверяем наличие основного конфига
@@ -155,12 +159,12 @@ HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$SELECTED_IP:443/?insecure=1"
 
 echo ""
 echo "=============================="
-echo "✓ Hysteria2 успешно установлен!"
+echo "✅ Hysteria2 успешно установлен!"
 echo "=============================="
-echo "IP Адрес: $SELECTED_IP"
-echo "Порт: 443"
+echo "IP Адрес:    $SELECTED_IP"
+echo "Порт:        443"
 echo "Пользователь: $NEW_USER"
-echo "Пароль: $NEW_PASS"
+echo "Пароль:      $NEW_PASS"
 echo "=============================="
 echo ""
 echo "📱 Ссылка для подключения:"
@@ -173,5 +177,4 @@ if command -v qrencode &> /dev/null; then
   qrencode -t ANSIUTF8 "$HYST_LINK"
   echo "====================================="
   echo "Отсканируйте этот QR-код в приложении Hysteria2"
-  echo ""
 fi
