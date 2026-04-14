@@ -2,32 +2,22 @@
 
 set -e
 
-# Функция для настройки маршрутизации
-setup_routing() {
-    local TARGET_IP=$1
-    
-    # Получаем основной шлюз и интерфейс
-    local GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
-    local INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
-    
-    if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-        echo "⚠️  Не удалось определить шлюз и интерфейс, пропускаем маршрутизацию"
-        return
-    fi
-    
-    echo "  Gateway: $GATEWAY, Interface: $INTERFACE"
-    
-    # Удаляем старое правило для этого IP, если оно было
-    ip rule del from $TARGET_IP table 200 2>/dev/null || true
-    
-    # Добавляем правило: весь трафик от нашего IP идет в таблицу 200
-    ip rule add from $TARGET_IP table 200
-    
-    # Обновляем/Создаем дефолтный маршрут в таблице 200 (replace не выдает ошибок!)
-    ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink
-    
-    echo "  ✅ Маршрутизация настроена"
-}
+# Определение архитектуры сервера
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)
+        HYS_ARCH="amd64"
+        YQ_ARCH="amd64"
+        ;;
+    aarch64)
+        HYS_ARCH="arm64"
+        YQ_ARCH="arm64"
+        ;;
+    *)
+        echo "❌ Архитектура $ARCH не поддерживается!"
+        exit 1
+        ;;
+esac
 
 get_all_ips() {
     ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d'/' -f1
@@ -82,22 +72,32 @@ KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
 SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
+# Получаем шлюз и интерфейс для маршрутизации
+GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
+INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
+
+if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
+    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
+    GATEWAY="127.0.0.1" # Заглушка, чтобы сервис не падал при синтаксической ошибке
+    INTERFACE="eth0"
+fi
+
 if [ ! -f "/usr/local/bin/hysteria" ]; then
   echo "📦 Установка зависимостей..."
   apt update
-  apt install -y wget curl tar openssl qrencode
+  apt install -y wget curl tar openssl qrencode python3
 
   if ! command -v yq &> /dev/null; then
-    echo "📥 Установка yq..."
-    wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    echo "📥 Установка yq (архитектура $YQ_ARCH)..."
+    wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
     chmod +x /usr/local/bin/yq
   fi
 
   echo "⬇️  Получение последней версии Hysteria2..."
   VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
-  echo "📥 Скачивание Hysteria2 версия $VERSION..."
-  wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
+  echo "📥 Скачивание Hysteria2 версия $VERSION (архитектура $HYS_ARCH)..."
+  wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
   chmod +x /usr/local/bin/hysteria
 else
   echo "✅ Hysteria2 уже установлен, пропускаем установку зависимостей"
@@ -106,7 +106,8 @@ fi
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
-  openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP"
+  openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP" 2>/dev/null
+  chmod 600 "$KEY_PATH" # Закрываем приватный ключ от посторонних (безопасность)
 
   echo "⚙️  Создание конфигурации Hysteria2..."
   cat > "$CONFIG_PATH" <<EOF
@@ -132,17 +133,26 @@ acl:
     - ip_outbound(all)
 EOF
 
-  echo "🔧 Создание systemd-сервиса для IP $SELECTED_IP..."
+  echo "🔧 Создание systemd-сервиса (с вечной маршрутизацией) для IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server - $SELECTED_IP
 After=network.target
 
 [Service]
+# Очищаем старые правила, если они залипли
+ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
+# Добавляем маршрутизацию прямо перед стартом сервера
+ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table 200"
+ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink"
+
 ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
 Restart=on-failure
 User=root
 Environment="GODEBUG=madvdontneed=1"
+
+# Убираем маршруты при остановке сервиса, чтобы не мусорить в системе
+ExecStopPost=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
 
 [Install]
 WantedBy=multi-user.target
@@ -151,16 +161,13 @@ EOF
   systemctl daemon-reload
   echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
   systemctl enable --now $SERVICE_NAME
-  
-  echo "🔧 Настройка маршрутизации для IP $SELECTED_IP..."
-  setup_routing "$SELECTED_IP"
 
 else
   echo "⚙️  Обновление конфигурации для IP $SELECTED_IP..."
   if ! command -v yq &> /dev/null; then
     apt update
     apt install -y wget
-    wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+    wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
     chmod +x /usr/local/bin/yq
   fi
 
@@ -170,12 +177,10 @@ else
     yq -i '.auth.userpass = {}' "$CONFIG_PATH"
   fi
 
-  # Добавляем нового пользователя, оставляя старых!
   if ! yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH" &>/dev/null || [ "$(yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH")" = "null" ]; then
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
   fi
 
-  # Проверяем, есть ли уже правила для исходящего IP, если нет - добавляем (только bindIPv4)
   if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
     echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
     yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
