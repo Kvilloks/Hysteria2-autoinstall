@@ -84,12 +84,6 @@ if [ ! -f "$CONFIG_PATH" ]; then
   echo "⚙️  Создание конфигурации Hysteria2..."
   cat > "$CONFIG_PATH" <<EOF
 listen: $SELECTED_IP:443
-outbound:
-  direct:
-    - type: tcp
-      bind: $SELECTED_IP
-    - type: udp
-      bind: $SELECTED_IP
 tls:
   cert: $CERT_PATH
   key: $KEY_PATH
@@ -122,6 +116,10 @@ EOF
   systemctl daemon-reload
   echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
   systemctl enable --now $SERVICE_NAME
+  
+  # НОВОЕ: Настройка маршрутизации для этого IP
+  echo "🔧 Настройка маршрутизации для IP $SELECTED_IP..."
+  setup_routing "$SELECTED_IP"
 
 else
   echo "⚙️  Обновление конфигурации для IP $SELECTED_IP..."
@@ -146,7 +144,7 @@ else
   systemctl restart $SERVICE_NAME
 fi
 
-# URL-encode пароль правильно (все спецсимволы)
+# URL-encode пароль правильно
 ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
@@ -177,3 +175,32 @@ echo "=============================="
 echo "📊 Активные Hysteria2 сервисы:"
 echo "=============================="
 systemctl list-units --all | grep hysteria-server || echo "Нет активных сервисов"
+
+# Функция для настройки маршрутизации
+setup_routing() {
+    local TARGET_IP=$1
+    local TABLE_ID=$(echo $TARGET_IP | tr '.' '_')
+    
+    # Получаем основной шлюз и интерфейс
+    local GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
+    local INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
+    
+    if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
+        echo "⚠️  Не удалось определить шлюз и интерфейс, пропускаем маршрутизацию"
+        return
+    fi
+    
+    echo "  Gateway: $GATEWAY, Interface: $INTERFACE"
+    
+    # Создаем таблицу маршрутизации
+    echo "200 table_$TABLE_ID" >> /etc/iproute2/rt_tables 2>/dev/null || true
+    
+    # Удаляем старые правила если есть
+    ip rule del from $TARGET_IP 2>/dev/null || true
+    
+    # Добавляем новые правила маршрутизации
+    ip rule add from $TARGET_IP table table_$TABLE_ID
+    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID
+    
+    echo "  ✅ Маршрутизация настроена"
+}
