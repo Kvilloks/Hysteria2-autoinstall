@@ -146,8 +146,8 @@ else
   systemctl restart $SERVICE_NAME
 fi
 
-# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: URL-encode пароль (заменяем / на %2F)
-ENCODED_PASS=$(echo "$NEW_PASS" | sed 's/\//%2F/g')
+# URL-encode пароль правильно (все спецсимволы)
+ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
 echo ""
@@ -161,7 +161,7 @@ echo "Пользователь: $NEW_USER"
 echo "Пароль:       $NEW_PASS"
 echo "=============================="
 echo ""
-echo "��� Ссылка для подключения:"
+echo "📱 Ссылка для подключения:"
 echo "$HYST_LINK"
 echo ""
 
