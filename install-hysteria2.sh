@@ -24,9 +24,9 @@ setup_routing() {
     # Удаляем старые правила если есть
     ip rule del from $TARGET_IP 2>/dev/null || true
     
-    # Добавляем новые правила маршрутизации
+    # Добавляем новые правила маршрутизации (исправленный синтаксис)
     ip rule add from $TARGET_IP table table_$TABLE_ID
-    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID
+    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID 2>/dev/null || ip route add table table_$TABLE_ID default via $GATEWAY
     
     echo "  ✅ Маршрутизация настроена"
 }
@@ -63,7 +63,7 @@ IPS=($(get_all_ips))
 select_ip
 
 while true; do
-    read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
+    read -p "Выберите ном��р IP (1-${#IPS[@]}): " IP_CHOICE
     
     if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
