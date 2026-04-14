@@ -2,11 +2,6 @@
 
 set -e
 
-CONFIG_PATH="/etc/hysteria/config.yaml"
-CERT_PATH="/etc/hysteria/cert.pem"
-KEY_PATH="/etc/hysteria/key.pem"
-SERVICE_PATH="/etc/systemd/system/hysteria-server.service"
-
 # Получение всех IP-адресов с сервера
 get_all_ips() {
     ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d'/' -f1
@@ -14,10 +9,8 @@ get_all_ips() {
 
 # Функция выбора IP-адреса
 select_ip() {
-    # Получаем все IP в массив
     IPS=($(get_all_ips))
     
-    # Если нет публичных IP, спросим вручную
     if [ ${#IPS[@]} -eq 0 ]; then
         echo "❌ Не найдены публичные IP-адреса."
         read -p "Введите IP-адрес вручную: " MANUAL_IP
@@ -25,7 +18,6 @@ select_ip() {
         return
     fi
     
-    # Показываем список IP с номерами (выводим только один раз!)
     echo ""
     echo "=============================="
     echo "Доступные IP-адреса на сервере:"
@@ -49,7 +41,6 @@ select_ip
 while true; do
     read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
     
-    # Проверяем корректность выбора
     if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
         break
@@ -62,7 +53,15 @@ echo ""
 echo "✅ Выбран IP: $SELECTED_IP"
 echo ""
 
-# Проверяем наличие основного конфига
+# Используем IP адрес как идентификатор для разных инстансов
+IP_SAFE=$(echo $SELECTED_IP | tr '.' '_')
+CONFIG_PATH="/etc/hysteria/config_${IP_SAFE}.yaml"
+CERT_PATH="/etc/hysteria/cert_${IP_SAFE}.pem"
+KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
+SERVICE_NAME="hysteria-server-${IP_SAFE}"
+SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+
+# Проверяем наличие конфига для этого IP
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "📦 Установка зависимостей..."
   apt update
@@ -75,16 +74,19 @@ if [ ! -f "$CONFIG_PATH" ]; then
     chmod +x /usr/local/bin/yq
   fi
 
-  echo "⬇️  Получение последней версии Hysteria2..."
-  VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+  # Получение последней версии Hysteria2 (только при первой установке)
+  if [ ! -f "/usr/local/bin/hysteria" ]; then
+    echo "⬇️  Получение последней версии Hysteria2..."
+    VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
-  echo "📥 Скачивание Hysteria2 версия $VERSION..."
-  wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
-  chmod +x /usr/local/bin/hysteria
+    echo "📥 Скачивание Hysteria2 версия $VERSION..."
+    wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
+    chmod +x /usr/local/bin/hysteria
+  fi
 
-  echo "🔐 Генерация сертификата..."
+  echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
-  openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
+  openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP"
 
   echo "⚙️  Создание конфигурации Hysteria2..."
   cat > "$CONFIG_PATH" <<EOF
@@ -102,14 +104,14 @@ masquerade:
     url: https://www.bing.com/
 EOF
 
-  echo "🔧 Создание systemd-сервиса..."
+  echo "🔧 Создание systemd-сервиса для IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
-Description=Hysteria2 Server
+Description=Hysteria2 Server - $SELECTED_IP
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.yaml
+ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
 Restart=on-failure
 User=root
 
@@ -118,11 +120,11 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  echo "🚀 Запуск Hysteria2..."
-  systemctl enable --now hysteria-server
+  echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
+  systemctl enable --now $SERVICE_NAME
 
 else
-  echo "⚙️  Обновление конфигурации..."
+  echo "⚙️  Обновление конфигурации для IP $SELECTED_IP..."
   if ! command -v yq &> /dev/null; then
     apt update
     apt install -y wget
@@ -140,8 +142,8 @@ else
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
   fi
 
-  echo "🔄 Перезапуск сервиса..."
-  systemctl restart hysteria-server
+  echo "🔄 Перезапуск сервиса для IP $SELECTED_IP..."
+  systemctl restart $SERVICE_NAME
 fi
 
 HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$SELECTED_IP:443/?insecure=1"
@@ -152,11 +154,12 @@ echo "✅ Hysteria2 успешно установлен!"
 echo "=============================="
 echo "IP Адрес:     $SELECTED_IP"
 echo "Порт:         443"
+echo "Сервис:       $SERVICE_NAME"
 echo "Пользователь: $NEW_USER"
 echo "Пароль:       $NEW_PASS"
 echo "=============================="
 echo ""
-echo "📱 Сс��лка для подключения:"
+echo "📱 Ссылка для подключения:"
 echo "$HYST_LINK"
 echo ""
 
@@ -165,4 +168,12 @@ if command -v qrencode &> /dev/null; then
   qrencode -t ANSIUTF8 "$HYST_LINK"
   echo "====================================="
   echo "Отсканируйте этот QR-код в приложении Hysteria2"
+  echo ""
 fi
+
+# Показываем все активные сервисы Hysteria2
+echo ""
+echo "=============================="
+echo "📊 Активные Hysteria2 сервисы:"
+echo "=============================="
+systemctl list-units --all | grep hysteria-server || echo "Нет активных сервисов"
