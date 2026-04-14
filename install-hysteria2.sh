@@ -303,7 +303,7 @@ else
   if [ "$SOCKS_CHOICE" == "1" ]; then
     echo "⚠️ ВНИМАНИЕ: Так как вы добавляете юзера на уже существующий IP,"
     echo "⚠️ Hysteria2 сохранит старых пользователей, но SOCKS5 будет ПЕРЕЗАПИСАН."
-    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользователь!"
+    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользоват��ль!"
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
