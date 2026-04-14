@@ -63,7 +63,7 @@ IPS=($(get_all_ips))
 select_ip
 
 while true; do
-    read -p "Выберите ном��р IP (1-${#IPS[@]}): " IP_CHOICE
+    read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
     
     if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
@@ -124,6 +124,14 @@ masquerade:
   type: proxy
   proxy:
     url: https://www.bing.com/
+outbounds:
+  - name: ip_outbound
+    type: direct
+    direct:
+      bind: $SELECTED_IP
+acl:
+  inline:
+    - ip_outbound(all)
 EOF
 
   echo "🔧 Создание systemd-сервиса для IP $SELECTED_IP..."
@@ -164,8 +172,16 @@ else
     yq -i '.auth.userpass = {}' "$CONFIG_PATH"
   fi
 
+  # Добавляем нового пользователя, оставляя старых!
   if ! yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH" &>/dev/null || [ "$(yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH")" = "null" ]; then
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
+  fi
+
+  # Проверяем, есть ли уже правила для исходящего IP, если нет - добавляем
+  if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
+    echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
+    yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bind": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
+    yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
 
   echo "🔄 Перезапуск сервиса для IP $SELECTED_IP..."
