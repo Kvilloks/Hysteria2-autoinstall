@@ -2,6 +2,35 @@
 
 set -e
 
+# Функция для настройки маршрутизации (ДОЛЖНА БЫТЬ В НАЧАЛЕ!)
+setup_routing() {
+    local TARGET_IP=$1
+    local TABLE_ID=$(echo $TARGET_IP | tr '.' '_')
+    
+    # Получаем основной шлюз и интерфейс
+    local GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
+    local INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
+    
+    if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
+        echo "⚠️  Не удалось определить шлюз и интерфейс, пропускаем маршрутизацию"
+        return
+    fi
+    
+    echo "  Gateway: $GATEWAY, Interface: $INTERFACE"
+    
+    # Создаем таблицу маршрутизации
+    echo "200 table_$TABLE_ID" >> /etc/iproute2/rt_tables 2>/dev/null || true
+    
+    # Удаляем старые правила если есть
+    ip rule del from $TARGET_IP 2>/dev/null || true
+    
+    # Добавляем новые правила маршрутизации
+    ip rule add from $TARGET_IP table table_$TABLE_ID
+    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID
+    
+    echo "  ✅ Маршрутизация настроена"
+}
+
 get_all_ips() {
     ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d'/' -f1
 }
@@ -117,7 +146,6 @@ EOF
   echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
   systemctl enable --now $SERVICE_NAME
   
-  # НОВОЕ: Настройка маршрутизации для этого IP
   echo "🔧 Настройка маршрутизации для IP $SELECTED_IP..."
   setup_routing "$SELECTED_IP"
 
@@ -175,32 +203,3 @@ echo "=============================="
 echo "📊 Активные Hysteria2 сервисы:"
 echo "=============================="
 systemctl list-units --all | grep hysteria-server || echo "Нет активных сервисов"
-
-# Функция для настройки маршрутизации
-setup_routing() {
-    local TARGET_IP=$1
-    local TABLE_ID=$(echo $TARGET_IP | tr '.' '_')
-    
-    # Получаем основной шлюз и интерфейс
-    local GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
-    local INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
-    
-    if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-        echo "⚠️  Не удалось определить шлюз и интерфейс, пропускаем маршрутизацию"
-        return
-    fi
-    
-    echo "  Gateway: $GATEWAY, Interface: $INTERFACE"
-    
-    # Создаем таблицу маршрутизации
-    echo "200 table_$TABLE_ID" >> /etc/iproute2/rt_tables 2>/dev/null || true
-    
-    # Удаляем старые правила если есть
-    ip rule del from $TARGET_IP 2>/dev/null || true
-    
-    # Добавляем новые правила маршрутизации
-    ip rule add from $TARGET_IP table table_$TABLE_ID
-    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID
-    
-    echo "  ✅ Маршрутизация настроена"
-}
