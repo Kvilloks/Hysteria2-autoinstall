@@ -57,30 +57,26 @@ while true; do
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
         break
     else
-        echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
+        echo "❌ Ошибка: пожалуйста введит�� число от 1 до ${#IPS[@]}"
+    fi
+done
+
+while true; do
+    read -p "Установить дополнительно SOCKS5 прокси на этот IP? (1 - Да, 0 - Нет): " SOCKS_CHOICE
+    if [[ "$SOCKS_CHOICE" == "0" || "$SOCKS_CHOICE" == "1" ]]; then
+        break
+    else
+        echo "❌ Ошибка: введите 1 (Да) или 0 (Нет)."
     fi
 done
 
 echo ""
 echo "✅ Выбран IP: $SELECTED_IP"
-echo ""
-
-# Запрос на установку SOCKS5
-INSTALL_SOCKS=0
-while true; do
-    read -p "Установить дополнительно SOCKS5 прокси на этот IP? (1 - да, 0 - нет): " SOCKS_CHOICE
-    if [[ "$SOCKS_CHOICE" =~ ^[01]$ ]] || [[ "$SOCKS_CHOICE" =~ ^[YyNn]$ ]]; then
-        if [[ "$SOCKS_CHOICE" == "1" ]] || [[ "$SOCKS_CHOICE" =~ ^[Yy]$ ]]; then
-            INSTALL_SOCKS=1
-            echo "✅ Будет установлен SOCKS5 прокси."
-        else
-            echo "❌ Установка SOCKS5 пропущена."
-        fi
-        break
-    else
-        echo "❌ Ошибка: пожалуйста введите 1 (да) или 0 (нет)."
-    fi
-done
+if [ "$SOCKS_CHOICE" == "1" ]; then
+    echo "✅ SOCKS5: Будет установлен"
+else
+    echo "✅ SOCKS5: Установка пропущена"
+fi
 echo ""
 
 IP_SAFE=$(echo $SELECTED_IP | tr '.' '_')
@@ -91,6 +87,10 @@ SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
 SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
+
+# Уникальная таблица маршрутизации на основе последнего октета IP (например: 192.168.1.45 -> таблица 245)
+LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
+TABLE_ID=$((200 + LAST_OCTET % 50000)) # Защита от совпадений
 
 # Получаем шлюз и интерфейс для маршрутизации
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -111,11 +111,11 @@ fi
 
 # Базовые пакеты
 PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2"
-if [ "$INSTALL_SOCKS" -eq 1 ]; then
+if [ "$SOCKS_CHOICE" == "1" ]; then
     PACKAGES="$PACKAGES build-essential git"
 fi
 
-if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$INSTALL_SOCKS" -eq 1 ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
+if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
   echo "📦 Установка зависимостей..."
   apt update
   apt install -y $PACKAGES
@@ -140,7 +140,7 @@ else
 fi
 
 # --- Установка SOCKS5 (microsocks) ---
-if [ "$INSTALL_SOCKS" -eq 1 ] && [ ! -f "/usr/local/bin/microsocks" ]; then
+if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
   echo "📦 Компиляция MicroSocks..."
   cd /tmp
   rm -rf microsocks
@@ -180,6 +180,8 @@ acl:
   inline:
     - ip_outbound(all)
 EOF
+  # Безопасность файла конфигурации (защита от чтения)
+  chmod 600 "$CONFIG_PATH"
 
   # Генерируем уникальные сетевые отпечатки для этого IP
   MARK_ID=$(shuf -i 100-9999 -n 1)      # Уникальный ID для tc filter
@@ -193,9 +195,9 @@ Description=Hysteria2 Server - $SELECTED_IP
 After=network.target
 
 [Service]
-ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
-ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table 200"
-ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink"
+ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table $TABLE_ID 2>/dev/null"
+ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table $TABLE_ID"
+ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table $TABLE_ID onlink"
 
 ExecStartPre=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
 ExecStartPre=/bin/bash -c "iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
@@ -205,16 +207,16 @@ ExecStartPre=-/bin/bash -c "tc class show dev $INTERFACE | grep -q 'classid 1:10
 ExecStartPre=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
 ExecStartPre=/bin/bash -c "tc class add dev $INTERFACE parent 1: classid 1:$MARK_ID htb rate 1000mbit"
 ExecStartPre=/bin/bash -c "tc qdisc add dev $INTERFACE parent 1:$MARK_ID handle $MARK_ID: netem delay ${DELAY}ms ${JITTER}ms distribution normal"
-ExecStartPre=/bin/bash -c "tc filter add dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip src $SELECTED_IP flowid 1:$MARK_ID"
+ExecStartPre=/bin/bash -c "tc filter add dev $INTERFACE protocol ip parent 1:0 prio $MARK_ID u32 match ip src $SELECTED_IP flowid 1:$MARK_ID"
 
 ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
 Restart=on-failure
 User=root
 Environment="GODEBUG=madvdontneed=1"
 
-ExecStopPost=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
+ExecStopPost=-/bin/bash -c "ip rule del from $SELECTED_IP table $TABLE_ID 2>/dev/null"
 ExecStopPost=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
-ExecStopPost=-/bin/bash -c "tc filter del dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip src $SELECTED_IP flowid 1:$MARK_ID 2>/dev/null"
+ExecStopPost=-/bin/bash -c "tc filter del dev $INTERFACE protocol ip parent 1:0 prio $MARK_ID 2>/dev/null"
 ExecStopPost=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
 
 [Install]
@@ -224,6 +226,27 @@ EOF
   systemctl daemon-reload
   echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
   systemctl enable --now $SERVICE_NAME
+
+  if [ "$SOCKS_CHOICE" == "1" ]; then
+    echo "🔧 Создание systemd-сервиса SOCKS5 для IP $SELECTED_IP..."
+    cat > "$SOCKS_SERVICE_PATH" <<EOF
+[Unit]
+Description=MicroSocks Server - $SELECTED_IP
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P $NEW_PASS
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    chmod 600 "$SOCKS_SERVICE_PATH"
+    systemctl daemon-reload
+    echo "🚀 Запуск SOCKS5 на IP $SELECTED_IP..."
+    systemctl enable --now $SOCKS_SERVICE_NAME
+  fi
 
 else
   echo "⚙️  Обновление конфигурации Hysteria2 для IP $SELECTED_IP..."
@@ -252,12 +275,12 @@ else
 
   echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
   systemctl restart $SERVICE_NAME
-fi
-
-# Конфигурация и запуск SOCKS5, если запрошено
-if [ "$INSTALL_SOCKS" -eq 1 ]; then
-  echo "🔧 Настройка SOCKS5 сервиса для IP $SELECTED_IP..."
-  cat > "$SOCKS_SERVICE_PATH" <<EOF
+  
+  if [ "$SOCKS_CHOICE" == "1" ]; then
+    echo "⚠️ ВНИМАНИЕ: Так как вы добавляете юзера на уже существующий IP,"
+    echo "⚠️ Hysteria2 сохранит старых пользователей, но SOCKS5 будет ПЕРЕЗАПИСАН."
+    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользователь!"
+    cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
 After=network.target
@@ -270,18 +293,20 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
-  systemctl enable --now $SOCKS_SERVICE_NAME
-  systemctl restart $SOCKS_SERVICE_NAME
+    chmod 600 "$SOCKS_SERVICE_PATH"
+    systemctl daemon-reload
+    systemctl restart $SOCKS_SERVICE_NAME || systemctl enable --now $SOCKS_SERVICE_NAME
+  fi
 fi
 
 # URL-encode пароль правильно
 ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
+SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
 
 echo ""
 echo "=========================================="
-echo "✅ УСТАНОВКА ЗАВЕРШЕНА!"
+echo "✅ ПРОКСИ УСПЕШНО УСТАНОВЛЕНЫ!"
 echo "=========================================="
 echo "IP Адрес:     $SELECTED_IP"
 echo "Пользователь: $NEW_USER"
@@ -292,14 +317,14 @@ echo "Сервис:       $SERVICE_NAME"
 echo "Ссылка:"
 echo "$HYST_LINK"
 
-if [ "$INSTALL_SOCKS" -eq 1 ]; then
-  SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
+if [ "$SOCKS_CHOICE" == "1" ]; then
   echo "------------------------------------------"
   echo "🟡 SOCKS5 (Порт: 1080)"
   echo "Сервис:       $SOCKS_SERVICE_NAME"
   echo "Ссылка:"
   echo "$SOCKS_LINK"
 fi
+
 echo "=========================================="
 echo ""
 
