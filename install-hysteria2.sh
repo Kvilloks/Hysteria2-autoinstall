@@ -105,20 +105,21 @@ fi
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
 echo "🥷 Применение глобальных сетевых настроек ядра и DNS..."
 
-# Подмена системных DNS (защита от DNS Leak для SOCKS5)
+# ЖЕСТКОЕ удаление DNS-утечек провайдера (убиваем systemd-resolved для resolv.conf)
 chattr -i /etc/resolv.conf 2>/dev/null || true
+rm -f /etc/resolv.conf
 cat > /etc/resolv.conf <<EOF
 nameserver 8.8.8.8
 nameserver 9.9.9.9
 nameserver 1.1.1.1
 EOF
-chattr +i /etc/resolv.conf 2>/dev/null || true # Запрещаем хостингу перезаписывать этот файл
+chattr +i /etc/resolv.conf 2>/dev/null || true
 
 # Отключение TCP Timestamps для маскировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
 fi
-# Включение TCP BBR для ускорения работы SOCKS5 (снижение packet loss)
+# Включение TCP BBR для ускорения работы SOCKS5
 if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
@@ -303,7 +304,7 @@ else
   if [ "$SOCKS_CHOICE" == "1" ]; then
     echo "⚠️ ВНИМАНИЕ: Так как вы добавляете юзера на уже существующий IP,"
     echo "⚠️ Hysteria2 сохранит старых пользователей, но SOCKS5 будет ПЕРЕЗАПИСАН."
-    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользоват��ль!"
+    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользователь!"
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
