@@ -30,16 +30,18 @@ select_ip() {
     fi
     
     # Показываем список IP с номерами
+    echo ""
     for i in "${!IPS[@]}"; do
         echo "$((i+1)). ${IPS[$i]}"
     done
-    
     echo ""
+    
+    # Спрашиваем выбор
     read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
     
     # Проверяем корректность выбора
     if ! [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] || [ "$IP_CHOICE" -lt 1 ] || [ "$IP_CHOICE" -gt ${#IPS[@]} ]; then
-        echo "Ошибка: некорректный выбор!"
+        echo "❌ Ошибка: некорректный выбор!"
         exit 1
     fi
     
@@ -53,32 +55,38 @@ NEW_PASS=$(openssl rand -base64 12)
 
 # Выбор IP-адреса
 SELECTED_IP=$(select_ip)
+echo ""
 echo "✓ Выбран IP: $SELECTED_IP"
 echo ""
 
 # Проверяем наличие основного конфига
 if [ ! -f "$CONFIG_PATH" ]; then
-  # Обновление системы и установка зависимостей
+  echo "📦 Установка зависимостей..."
   apt update
   apt install -y wget curl tar openssl qrencode
 
   # Установка yq для работы с YAML
   if ! command -v yq &> /dev/null; then
+    echo "📥 Установка yq..."
     wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     chmod +x /usr/local/bin/yq
   fi
 
+  echo "⬇️  Получение последней версии Hysteria2..."
   # Получение последней версии Hysteria2
   VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
+  echo "📥 Скачивание Hysteria2 версия $VERSION..."
   # Скачивание и установка Hysteria2
   wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
   chmod +x /usr/local/bin/hysteria
 
+  echo "🔐 Генерация сертификата..."
   # Генерация самоподписанного сертификата
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
 
+  echo "⚙️  Создание конфигурации Hysteria2..."
   # Создание базового config.yaml с выбранным IP
   cat > "$CONFIG_PATH" <<EOF
 listen: $SELECTED_IP:443
@@ -95,6 +103,7 @@ masquerade:
     url: https://www.bing.com/
 EOF
 
+  echo "🔧 Создание systemd-сервиса..."
   # Создание systemd-сервиса
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
@@ -111,9 +120,11 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
+  echo "🚀 Запуск Hysteria2..."
   systemctl enable --now hysteria-server
 
 else
+  echo "⚙️  Обновление конфигурации..."
   # Если конфиг уже есть — просто добавляем нового пользователя
   if ! command -v yq &> /dev/null; then
     apt update
@@ -135,22 +146,24 @@ else
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
   fi
 
+  echo "🔄 Перезапуск сервиса..."
   # Перезапуск сервиса
   systemctl restart hysteria-server
 fi
 
 HYST_LINK="hysteria2://$NEW_USER:$NEW_PASS@$SELECTED_IP:443/?insecure=1"
 
+echo ""
 echo "=============================="
-echo "Hysteria2 user added!"
-echo "Port: 443"
-echo "IP Address: $SELECTED_IP"
-echo "New user: $NEW_USER"
-echo "New password: $NEW_PASS"
-echo "Certificate: $CERT_PATH"
+echo "✓ Hysteria2 успешно установлен!"
+echo "=============================="
+echo "IP Адрес: $SELECTED_IP"
+echo "Порт: 443"
+echo "Пользователь: $NEW_USER"
+echo "Пароль: $NEW_PASS"
 echo "=============================="
 echo ""
-echo "Your client URL:"
+echo "📱 Ссылка для подключения:"
 echo "$HYST_LINK"
 echo ""
 
@@ -159,5 +172,6 @@ if command -v qrencode &> /dev/null; then
   echo "=== QR-код для мобильного клиента ==="
   qrencode -t ANSIUTF8 "$HYST_LINK"
   echo "====================================="
-  echo "Отсканируйте этот QR-код камерой или в мобильном приложении-клиенте Hysteria2"
+  echo "Отсканируйте этот QR-код в приложении Hysteria2"
+  echo ""
 fi
