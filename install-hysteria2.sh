@@ -3,9 +3,9 @@
 set -e
 
 # Функция для настройки маршрутизации (ДОЛЖНА БЫТЬ В НАЧАЛЕ!)
+# Функция для настройки маршрутизации (ДОЛЖНА БЫТЬ В НАЧАЛЕ!)
 setup_routing() {
     local TARGET_IP=$1
-    local TABLE_ID=$(echo $TARGET_IP | tr '.' '_')
     
     # Получаем основной шлюз и интерфейс
     local GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -18,15 +18,14 @@ setup_routing() {
     
     echo "  Gateway: $GATEWAY, Interface: $INTERFACE"
     
-    # Создаем таблицу маршрутизации
-    echo "200 table_$TABLE_ID" >> /etc/iproute2/rt_tables 2>/dev/null || true
+    # Удаляем старое правило для этого IP, если оно было
+    ip rule del from $TARGET_IP table 200 2>/dev/null || true
     
-    # Удаляем старые правила если есть
-    ip rule del from $TARGET_IP 2>/dev/null || true
+    # Добавляем правило: весь трафик от нашего IP идет в таблицу 200
+    ip rule add from $TARGET_IP table 200
     
-    # Добавляем новые правила маршрутизации с флагом onlink
-    ip rule add from $TARGET_IP table table_$TABLE_ID
-    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID onlink 2>/dev/null || ip route add table table_$TABLE_ID default via $GATEWAY onlink
+    # Обновляем/Создаем дефолтный маршрут в таблице 200 (replace не выдает ошибок!)
+    ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink
     
     echo "  ✅ Маршрутизация настроена"
 }
