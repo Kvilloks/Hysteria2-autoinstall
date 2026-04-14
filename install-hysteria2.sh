@@ -77,9 +77,16 @@ GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠��� Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
+    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
     GATEWAY="127.0.0.1" 
     INTERFACE="eth0"
+fi
+
+# --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС (Отключение TCP Timestamps) ---
+if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
+    echo "🥷 Включение маскировки TCP/IP (отключение TCP Timestamps)..."
+    echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
+    sysctl -w net.ipv4.tcp_timestamps=0 > /dev/null 2>&1 || true
 fi
 
 if [ ! -f "/usr/local/bin/hysteria" ]; then
