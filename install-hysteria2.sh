@@ -77,15 +77,15 @@ GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
-    GATEWAY="127.0.0.1" # Заглушка, чтобы сервис не падал при синтаксической ошибке
+    echo "⚠��� Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
+    GATEWAY="127.0.0.1" 
     INTERFACE="eth0"
 fi
 
 if [ ! -f "/usr/local/bin/hysteria" ]; then
   echo "📦 Установка зависимостей..."
   apt update
-  apt install -y wget curl tar openssl qrencode python3
+  apt install -y wget curl tar openssl qrencode python3 iptables iproute2
 
   if ! command -v yq &> /dev/null; then
     echo "📥 Установка yq (архитектура $YQ_ARCH)..."
@@ -107,7 +107,7 @@ if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP" 2>/dev/null
-  chmod 600 "$KEY_PATH" # Закрываем приватный ключ от посторонних (безопасность)
+  chmod 600 "$KEY_PATH"
 
   echo "⚙️  Создание конфигурации Hysteria2..."
   cat > "$CONFIG_PATH" <<EOF
@@ -133,26 +133,47 @@ acl:
     - ip_outbound(all)
 EOF
 
-  echo "🔧 Создание systemd-сервиса (с вечной маршрутизацией) для IP $SELECTED_IP..."
+  # Генерируем уникальные сетевые отпечатки для этого IP
+  MARK_ID=$(shuf -i 100-9999 -n 1)      # Уникальный ID для tc filter
+  DELAY=$(shuf -i 7-18 -n 1)           # Базовый пинг (мс)
+  JITTER=$(shuf -i 2-6 -n 1)            # Плавающий пинг (джиттер)
+
+  echo "🔧 Создание systemd-сервиса (Анти-Детект) для IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server - $SELECTED_IP
 After=network.target
 
 [Service]
-# Очищаем старые правила, если они залипли
+# --- 1. Базовая маршрутизация ---
 ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
-# Добавляем маршрутизацию прямо перед стартом сервера
 ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table 200"
 ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink"
+
+# --- 2. Маскировка под Windows (TTL=128) ---
+ExecStartPre=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
+ExecStartPre=/bin/bash -c "iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
+
+# --- 3. Имитация разных сетей (Уникальный плавающий пинг) ---
+# Инициализация корневого диспетчера (если еще нет)
+ExecStartPre=-/bin/bash -c "tc qdisc show dev $INTERFACE | grep -q 'htb' || tc qdisc add dev $INTERFACE root handle 1: htb default 10"
+ExecStartPre=-/bin/bash -c "tc class show dev $INTERFACE | grep -q 'classid 1:10' || tc class add dev $INTERFACE parent 1: classid 1:10 htb rate 1000mbit"
+# Создание уникальной задержки для этого IP
+ExecStartPre=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
+ExecStartPre=/bin/bash -c "tc class add dev $INTERFACE parent 1: classid 1:$MARK_ID htb rate 1000mbit"
+ExecStartPre=/bin/bash -c "tc qdisc add dev $INTERFACE parent 1:$MARK_ID handle $MARK_ID: netem delay ${DELAY}ms ${JITTER}ms distribution normal"
+ExecStartPre=/bin/bash -c "tc filter add dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip src $SELECTED_IP flowid 1:$MARK_ID"
 
 ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
 Restart=on-failure
 User=root
 Environment="GODEBUG=madvdontneed=1"
 
-# Убираем маршруты при остановке сервиса, чтобы не мусорить в системе
+# --- Очистка следов при остановке ---
 ExecStopPost=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
+ExecStopPost=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
+ExecStopPost=-/bin/bash -c "tc filter del dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip src $SELECTED_IP flowid 1:$MARK_ID 2>/dev/null"
+ExecStopPost=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
 
 [Install]
 WantedBy=multi-user.target
