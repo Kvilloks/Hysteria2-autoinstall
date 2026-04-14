@@ -15,7 +15,7 @@ get_all_ips() {
 # Функция выбора IP-адреса
 select_ip() {
     # Получаем все IP в массив
-    mapfile -t IPS < <(get_all_ips)
+    IPS=($(get_all_ips))
     
     # Если нет публичных IP, спросим вручную
     if [ ${#IPS[@]} -eq 0 ]; then
@@ -25,7 +25,7 @@ select_ip() {
         return
     fi
     
-    # Показываем список IP с номерами
+    # Показываем список IP с номерами (выводим только один раз!)
     echo ""
     echo "=============================="
     echo "Доступные IP-адреса на сервере:"
@@ -35,29 +35,28 @@ select_ip() {
     done
     echo "=============================="
     echo ""
-    
-    # Спрашиваем выбор
-    while true; do
-        read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
-        
-        # Проверяем корректность выбора
-        if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
-            break
-        else
-            echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
-        fi
-    done
-    
-    # Возвращаем ТОЛЬКО выбранный IP
-    echo "${IPS[$((IP_CHOICE-1))]}"
 }
 
 # Генерация нового рандомного пользователя и пароля
 NEW_USER="user$(shuf -i 1000-9999 -n 1)"
 NEW_PASS=$(openssl rand -base64 12)
 
-# Выбор IP-адреса
-SELECTED_IP=$(select_ip)
+# Показываем список IP
+IPS=($(get_all_ips))
+select_ip
+
+# Спрашиваем выбор
+while true; do
+    read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
+    
+    # Проверяем корректность выбора
+    if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
+        SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
+        break
+    else
+        echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
+    fi
+done
 
 echo ""
 echo "✅ Выбран IP: $SELECTED_IP"
@@ -77,21 +76,17 @@ if [ ! -f "$CONFIG_PATH" ]; then
   fi
 
   echo "⬇️  Получение последней версии Hysteria2..."
-  # Получение последней версии Hysteria2
   VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
   echo "📥 Скачивание Hysteria2 версия $VERSION..."
-  # Скачивание и установка Hysteria2
   wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
   chmod +x /usr/local/bin/hysteria
 
   echo "🔐 Генерация сертификата..."
-  # Генерация самоподписанного сертификата
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$(hostname)"
 
   echo "⚙️  Создание конфигурации Hysteria2..."
-  # Создание базового config.yaml с выбранным IP
   cat > "$CONFIG_PATH" <<EOF
 listen: $SELECTED_IP:443
 tls:
@@ -108,7 +103,6 @@ masquerade:
 EOF
 
   echo "🔧 Создание systemd-сервиса..."
-  # Создание systemd-сервиса
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server
@@ -129,7 +123,6 @@ EOF
 
 else
   echo "⚙️  Обновление конфигурации..."
-  # Если конфиг уже есть — просто добавляем нового пользователя
   if ! command -v yq &> /dev/null; then
     apt update
     apt install -y wget
@@ -137,21 +130,17 @@ else
     chmod +x /usr/local/bin/yq
   fi
 
-  # Гарантируем что .auth.type = userpass
   yq -i '.auth.type = "userpass"' "$CONFIG_PATH"
 
-  # Если .auth.userpass отсутствует — создаём пустой map
   if ! yq eval '.auth.userpass' "$CONFIG_PATH" &>/dev/null || [ "$(yq eval '.auth.userpass' "$CONFIG_PATH")" = "null" ]; then
     yq -i '.auth.userpass = {}' "$CONFIG_PATH"
   fi
 
-  # Добавляем нового пользователя
   if ! yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH" &>/dev/null || [ "$(yq eval ".auth.userpass.$NEW_USER" "$CONFIG_PATH")" = "null" ]; then
     yq -i ".auth.userpass.\"$NEW_USER\" = \"$NEW_PASS\"" "$CONFIG_PATH"
   fi
 
   echo "🔄 Перезапуск сервиса..."
-  # Перезапуск сервиса
   systemctl restart hysteria-server
 fi
 
@@ -161,17 +150,16 @@ echo ""
 echo "=============================="
 echo "✅ Hysteria2 успешно установлен!"
 echo "=============================="
-echo "IP Адрес:    $SELECTED_IP"
-echo "Порт:        443"
+echo "IP Адрес:     $SELECTED_IP"
+echo "Порт:         443"
 echo "Пользователь: $NEW_USER"
-echo "Пароль:      $NEW_PASS"
+echo "Пароль:       $NEW_PASS"
 echo "=============================="
 echo ""
-echo "📱 Ссылка для подключения:"
+echo "📱 Сс��лка для подключения:"
 echo "$HYST_LINK"
 echo ""
 
-# Генерация QR-кода
 if command -v qrencode &> /dev/null; then
   echo "=== QR-код для мобильного клиента ==="
   qrencode -t ANSIUTF8 "$HYST_LINK"
