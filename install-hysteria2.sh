@@ -24,9 +24,9 @@ setup_routing() {
     # Удаляем старые правила если есть
     ip rule del from $TARGET_IP 2>/dev/null || true
     
-    # Добавляем новые правила маршрутизации (исправленный синтаксис)
+    # Добавляем новые правила маршрутизации с флагом onlink
     ip rule add from $TARGET_IP table table_$TABLE_ID
-    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID 2>/dev/null || ip route add table table_$TABLE_ID default via $GATEWAY
+    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID onlink 2>/dev/null || ip route add table table_$TABLE_ID default via $GATEWAY onlink
     
     echo "  ✅ Маршрутизация настроена"
 }
