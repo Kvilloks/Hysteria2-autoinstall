@@ -349,6 +349,12 @@ if [ "$SOCKS_CHOICE" == "1" ]; then
   echo "$SOCKS_LINK"
 fi
 
+echo "------------------------------------------"
+echo "📁 Расположение конфигураций:"
+echo "Конфиг Hysteria: $CONFIG_PATH"
+if [ "$SOCKS_CHOICE" == "1" ]; then
+  echo "Сервис SOCKS5:   $SOCKS_SERVICE_PATH"
+fi
 echo "=========================================="
 echo ""
 
