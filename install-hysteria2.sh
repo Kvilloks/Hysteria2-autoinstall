@@ -25,8 +25,11 @@ setup_routing() {
     ip rule del from $TARGET_IP 2>/dev/null || true
     
     # Добавляем новые правила маршрутизации (исправленный синтаксис)
+    # Флаг onlink необходим для сетей со специальными шлюзами (напр. 100.100.1.1).
+    # Запасной вариант: некоторые версии iproute2 требуют порядок аргументов с table перед default.
     ip rule add from $TARGET_IP table table_$TABLE_ID
-    ip route add default via $GATEWAY dev $INTERFACE table table_$TABLE_ID 2>/dev/null || ip route add table table_$TABLE_ID default via $GATEWAY
+    ip route add default via $GATEWAY dev $INTERFACE onlink table table_$TABLE_ID 2>/dev/null || \
+        ip route add table table_$TABLE_ID default via $GATEWAY onlink
     
     echo "  ✅ Маршрутизация настроена"
 }
@@ -170,6 +173,9 @@ else
 
   echo "🔄 Перезапуск сервиса для IP $SELECTED_IP..."
   systemctl restart $SERVICE_NAME
+  
+  echo "🔧 Настройка маршрутизации для IP $SELECTED_IP..."
+  setup_routing "$SELECTED_IP"
 fi
 
 # URL-encode пароль правильно
