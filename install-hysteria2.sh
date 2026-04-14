@@ -2,12 +2,10 @@
 
 set -e
 
-# Получение всех IP-адресов с сервера
 get_all_ips() {
     ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d'/' -f1
 }
 
-# Функция выбора IP-адреса
 select_ip() {
     IPS=($(get_all_ips))
     
@@ -29,15 +27,12 @@ select_ip() {
     echo ""
 }
 
-# Генерация нового рандомного пользователя и пароля
 NEW_USER="user$(shuf -i 1000-9999 -n 1)"
 NEW_PASS=$(openssl rand -base64 12)
 
-# Показываем список IP
 IPS=($(get_all_ips))
 select_ip
 
-# Спрашиваем выбор
 while true; do
     read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
     
@@ -53,7 +48,6 @@ echo ""
 echo "✅ Выбран IP: $SELECTED_IP"
 echo ""
 
-# Используем IP адрес как идентификатор для разных инстансов
 IP_SAFE=$(echo $SELECTED_IP | tr '.' '_')
 CONFIG_PATH="/etc/hysteria/config_${IP_SAFE}.yaml"
 CERT_PATH="/etc/hysteria/cert_${IP_SAFE}.pem"
@@ -61,29 +55,30 @@ KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
 SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
-# Проверяем наличие конфига для этого IP
-if [ ! -f "$CONFIG_PATH" ]; then
+# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Проверяем hysteria бинарник, а не конфиг!
+if [ ! -f "/usr/local/bin/hysteria" ]; then
   echo "📦 Установка зависимостей..."
   apt update
   apt install -y wget curl tar openssl qrencode
 
-  # Установка yq для работы с YAML
   if ! command -v yq &> /dev/null; then
     echo "📥 Установка yq..."
     wget -O /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
     chmod +x /usr/local/bin/yq
   fi
 
-  # Получение последней версии Hysteria2 (только при первой установке)
-  if [ ! -f "/usr/local/bin/hysteria" ]; then
-    echo "⬇️  Получение последней версии Hysteria2..."
-    VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+  echo "⬇️  Получение последней версии Hysteria2..."
+  VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
-    echo "📥 Скачивание Hysteria2 версия $VERSION..."
-    wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
-    chmod +x /usr/local/bin/hysteria
-  fi
+  echo "📥 Скачивание Hysteria2 версия $VERSION..."
+  wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-amd64"
+  chmod +x /usr/local/bin/hysteria
+else
+  echo "✅ Hysteria2 уже установлен, пропускаем установку зависимостей"
+fi
 
+# Проверяем есть ли конфиг для этого конкретного IP
+if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP"
@@ -171,8 +166,6 @@ if command -v qrencode &> /dev/null; then
   echo ""
 fi
 
-# Показываем все активные сервисы Hysteria2
-echo ""
 echo "=============================="
 echo "📊 Активные Hysteria2 сервисы:"
 echo "=============================="
