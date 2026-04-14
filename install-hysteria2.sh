@@ -55,7 +55,6 @@ KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
 SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 
-# КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Проверяем hysteria бинарник, а не конфиг!
 if [ ! -f "/usr/local/bin/hysteria" ]; then
   echo "📦 Установка зависимостей..."
   apt update
@@ -77,7 +76,6 @@ else
   echo "✅ Hysteria2 уже установлен, пропускаем установку зависимостей"
 fi
 
-# Проверяем есть ли конфиг для этого конкретного IP
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
@@ -86,6 +84,12 @@ if [ ! -f "$CONFIG_PATH" ]; then
   echo "⚙️  Создание конфигурации Hysteria2..."
   cat > "$CONFIG_PATH" <<EOF
 listen: $SELECTED_IP:443
+outbound:
+  direct:
+    - type: tcp
+      bind: $SELECTED_IP
+    - type: udp
+      bind: $SELECTED_IP
 tls:
   cert: $CERT_PATH
   key: $KEY_PATH
@@ -109,6 +113,7 @@ After=network.target
 ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
 Restart=on-failure
 User=root
+Environment="GODEBUG=madvdontneed=1"
 
 [Install]
 WantedBy=multi-user.target
