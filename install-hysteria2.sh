@@ -128,7 +128,7 @@ outbounds:
   - name: ip_outbound
     type: direct
     direct:
-      bind: $SELECTED_IP
+      bindIPV4: $SELECTED_IP
 acl:
   inline:
     - ip_outbound(all)
@@ -180,7 +180,7 @@ else
   # Проверяем, есть ли уже правила для исходящего IP, если нет - добавляем
   if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
     echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
-    yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bind": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
+    yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPV4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
 
