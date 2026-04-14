@@ -65,12 +65,32 @@ echo ""
 echo "✅ Выбран IP: $SELECTED_IP"
 echo ""
 
+# Запрос на установку SOCKS5
+INSTALL_SOCKS=0
+while true; do
+    read -p "Установить дополнительно SOCKS5 прокси на этот IP? (1 - да, 0 - нет): " SOCKS_CHOICE
+    if [[ "$SOCKS_CHOICE" =~ ^[01]$ ]] || [[ "$SOCKS_CHOICE" =~ ^[YyNn]$ ]]; then
+        if [[ "$SOCKS_CHOICE" == "1" ]] || [[ "$SOCKS_CHOICE" =~ ^[Yy]$ ]]; then
+            INSTALL_SOCKS=1
+            echo "✅ Будет установлен SOCKS5 прокси."
+        else
+            echo "❌ Установка SOCKS5 пропущена."
+        fi
+        break
+    else
+        echo "❌ Ошибка: пожалуйста введите 1 (да) или 0 (нет)."
+    fi
+done
+echo ""
+
 IP_SAFE=$(echo $SELECTED_IP | tr '.' '_')
 CONFIG_PATH="/etc/hysteria/config_${IP_SAFE}.yaml"
 CERT_PATH="/etc/hysteria/cert_${IP_SAFE}.pem"
 KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
 SERVICE_NAME="hysteria-server-${IP_SAFE}"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
+SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
+SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
 # Получаем шлюз и интерфейс для маршрутизации
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -89,11 +109,20 @@ if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     sysctl -w net.ipv4.tcp_timestamps=0 > /dev/null 2>&1 || true
 fi
 
-if [ ! -f "/usr/local/bin/hysteria" ]; then
+# Базовые пакеты
+PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2"
+if [ "$INSTALL_SOCKS" -eq 1 ]; then
+    PACKAGES="$PACKAGES build-essential git"
+fi
+
+if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$INSTALL_SOCKS" -eq 1 ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
   echo "📦 Установка зависимостей..."
   apt update
-  apt install -y wget curl tar openssl qrencode python3 iptables iproute2
+  apt install -y $PACKAGES
+fi
 
+# --- Установка Hysteria2 ---
+if [ ! -f "/usr/local/bin/hysteria" ]; then
   if ! command -v yq &> /dev/null; then
     echo "📥 Установка yq (архитектура $YQ_ARCH)..."
     wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
@@ -107,7 +136,19 @@ if [ ! -f "/usr/local/bin/hysteria" ]; then
   wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
   chmod +x /usr/local/bin/hysteria
 else
-  echo "✅ Hysteria2 уже установлен, пропускаем установку зависимостей"
+  echo "✅ Hysteria2 уже установлен."
+fi
+
+# --- Установка SOCKS5 (microsocks) ---
+if [ "$INSTALL_SOCKS" -eq 1 ] && [ ! -f "/usr/local/bin/microsocks" ]; then
+  echo "📦 Компиляция MicroSocks..."
+  cd /tmp
+  rm -rf microsocks
+  git clone https://github.com/rofl0r/microsocks.git
+  cd microsocks
+  make
+  cp microsocks /usr/local/bin/
+  cd ~
 fi
 
 if [ ! -f "$CONFIG_PATH" ]; then
@@ -145,27 +186,22 @@ EOF
   DELAY=$(shuf -i 5-12 -n 1)           # Базовый пинг (мс)
   JITTER=$(shuf -i 2-6 -n 1)            # Плавающий пинг (джиттер)
 
-  echo "🔧 Создание systemd-сервиса (Анти-Детект) для IP $SELECTED_IP..."
+  echo "🔧 Создание systemd-сервиса Hysteria2 (Анти-Детект) для IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server - $SELECTED_IP
 After=network.target
 
 [Service]
-# --- 1. Базовая маршрутизация ---
 ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
 ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table 200"
 ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table 200 onlink"
 
-# --- 2. Маскировка под Windows (TTL=128) ---
 ExecStartPre=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
 ExecStartPre=/bin/bash -c "iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
 
-# --- 3. Имитация разных сетей (Уникальный плавающий пинг) ---
-# Инициализация корневого диспетчера (если еще нет)
 ExecStartPre=-/bin/bash -c "tc qdisc show dev $INTERFACE | grep -q 'htb' || tc qdisc add dev $INTERFACE root handle 1: htb default 10"
 ExecStartPre=-/bin/bash -c "tc class show dev $INTERFACE | grep -q 'classid 1:10' || tc class add dev $INTERFACE parent 1: classid 1:10 htb rate 1000mbit"
-# Создание уникальной задержки для этого IP
 ExecStartPre=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
 ExecStartPre=/bin/bash -c "tc class add dev $INTERFACE parent 1: classid 1:$MARK_ID htb rate 1000mbit"
 ExecStartPre=/bin/bash -c "tc qdisc add dev $INTERFACE parent 1:$MARK_ID handle $MARK_ID: netem delay ${DELAY}ms ${JITTER}ms distribution normal"
@@ -176,7 +212,6 @@ Restart=on-failure
 User=root
 Environment="GODEBUG=madvdontneed=1"
 
-# --- Очистка следов при остановке ---
 ExecStopPost=-/bin/bash -c "ip rule del from $SELECTED_IP table 200 2>/dev/null"
 ExecStopPost=-/bin/bash -c "iptables -t mangle -D POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null"
 ExecStopPost=-/bin/bash -c "tc filter del dev $INTERFACE protocol ip parent 1:0 prio 1 u32 match ip src $SELECTED_IP flowid 1:$MARK_ID 2>/dev/null"
@@ -191,7 +226,7 @@ EOF
   systemctl enable --now $SERVICE_NAME
 
 else
-  echo "⚙️  Обновление конфигурации для IP $SELECTED_IP..."
+  echo "⚙️  Обновление конфигурации Hysteria2 для IP $SELECTED_IP..."
   if ! command -v yq &> /dev/null; then
     apt update
     apt install -y wget
@@ -215,8 +250,29 @@ else
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
 
-  echo "🔄 Перезапуск сервиса для IP $SELECTED_IP..."
+  echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
   systemctl restart $SERVICE_NAME
+fi
+
+# Конфигурация и запуск SOCKS5, если запрошено
+if [ "$INSTALL_SOCKS" -eq 1 ]; then
+  echo "🔧 Настройка SOCKS5 сервиса для IP $SELECTED_IP..."
+  cat > "$SOCKS_SERVICE_PATH" <<EOF
+[Unit]
+Description=MicroSocks Server - $SELECTED_IP
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P $NEW_PASS
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now $SOCKS_SERVICE_NAME
+  systemctl restart $SOCKS_SERVICE_NAME
 fi
 
 # URL-encode пароль правильно
@@ -224,30 +280,32 @@ ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_P
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
 echo ""
-echo "=============================="
-echo "✅ Hysteria2 успешно установлен!"
-echo "=============================="
+echo "=========================================="
+echo "✅ УСТАНОВКА ЗАВЕРШЕНА!"
+echo "=========================================="
 echo "IP Адрес:     $SELECTED_IP"
-echo "Порт:         443"
-echo "Сервис:       $SERVICE_NAME"
 echo "Пользователь: $NEW_USER"
 echo "Пароль:       $NEW_PASS"
-echo "📁 Конфиг:    $CONFIG_PATH"
-echo "=============================="
-echo ""
-echo "📱 Ссылка для подключения:"
+echo "------------------------------------------"
+echo "🟢 Hysteria2 (Порт: 443)"
+echo "Сервис:       $SERVICE_NAME"
+echo "Ссылка:"
 echo "$HYST_LINK"
+
+if [ "$INSTALL_SOCKS" -eq 1 ]; then
+  SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
+  echo "------------------------------------------"
+  echo "🟡 SOCKS5 (Порт: 1080)"
+  echo "Сервис:       $SOCKS_SERVICE_NAME"
+  echo "Ссылка:"
+  echo "$SOCKS_LINK"
+fi
+echo "=========================================="
 echo ""
 
 if command -v qrencode &> /dev/null; then
-  echo "=== QR-код для мобильного клиента ==="
+  echo "=== QR-код Hysteria2 для мобильного ==="
   qrencode -t ANSIUTF8 "$HYST_LINK"
-  echo "====================================="
-  echo "Отсканируйте этот QR-код в приложении Hysteria2"
+  echo "======================================="
   echo ""
 fi
-
-echo "=============================="
-echo "📊 Активные Hysteria2 сервисы:"
-echo "=============================="
-systemctl list-units --all | grep hysteria-server || echo "Нет активных сервисов"
