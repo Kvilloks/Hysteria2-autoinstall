@@ -88,9 +88,9 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
 SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
-# Уникальная таблица маршрутизации на основе последнего октета IP (например: 192.168.1.45 -> таблица 245)
+# Уникальная таблица маршрутизации на основе последнего октета IP
 LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
-TABLE_ID=$((200 + LAST_OCTET % 50000)) # Защита от совпадений
+TABLE_ID=$((200 + LAST_OCTET % 50000))
 
 # Получаем шлюз и интерфейс для маршрутизации
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -103,7 +103,17 @@ if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
 fi
 
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
-echo "🥷 Применение глобальных сетевых настроек ядра..."
+echo "🥷 Применение глобальных сетевых настроек ядра и DNS..."
+
+# Подмена системных DNS (защита от DNS Leak для SOCKS5)
+chattr -i /etc/resolv.conf 2>/dev/null || true
+cat > /etc/resolv.conf <<EOF
+nameserver 8.8.8.8
+nameserver 9.9.9.9
+nameserver 1.1.1.1
+EOF
+chattr +i /etc/resolv.conf 2>/dev/null || true # Запрещаем хостингу перезаписывать этот файл
+
 # Отключение TCP Timestamps для маскировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
@@ -115,9 +125,8 @@ if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
 fi
 sysctl -p > /dev/null 2>&1 || true
 
-
 # Базовые пакеты
-PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2"
+PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2 e2fsprogs"
 if [ "$SOCKS_CHOICE" == "1" ]; then
     PACKAGES="$PACKAGES build-essential git"
 fi
@@ -174,6 +183,11 @@ auth:
   type: userpass
   userpass:
     $NEW_USER: "$NEW_PASS"
+dns:
+  servers:
+    - 8.8.8.8
+    - 9.9.9.9
+    - 1.1.1.1
 masquerade:
   type: proxy
   proxy:
@@ -187,13 +201,11 @@ acl:
   inline:
     - ip_outbound(all)
 EOF
-  # Безопасность файла конфигурации (защита от чтения)
   chmod 600 "$CONFIG_PATH"
 
-  # Генерируем уникальные сетевые отпечатки для этого IP
-  MARK_ID=$(shuf -i 100-9999 -n 1)      # Уникальный ID для tc filter
-  DELAY=$(shuf -i 5-12 -n 1)           # Базовый пинг (мс)
-  JITTER=$(shuf -i 2-6 -n 1)            # Плавающий пинг (джиттер)
+  MARK_ID=$(shuf -i 100-9999 -n 1)      
+  DELAY=$(shuf -i 5-12 -n 1)           
+  JITTER=$(shuf -i 2-6 -n 1)            
 
   echo "🔧 Создание systemd-сервиса Hysteria2 (Анти-Детект) для IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
@@ -278,6 +290,11 @@ else
     echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
     yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
+  fi
+  
+  if [ "$(yq eval '.dns' "$CONFIG_PATH")" = "null" ]; then
+    echo "🔧 Добавление безопасных DNS в существующий конфиг..."
+    yq -i '.dns.servers = ["8.8.8.8", "9.9.9.9", "1.1.1.1"]' "$CONFIG_PATH"
   fi
 
   echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
