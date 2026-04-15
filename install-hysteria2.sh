@@ -105,7 +105,6 @@ fi
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
 echo "🥷 Применение глобальных сетевых настроек ядра и DNS..."
 
-# ЖЕСТКОЕ удаление DNS-утечек провайдера
 systemctl stop systemd-resolved 2>/dev/null || true
 systemctl disable systemd-resolved 2>/dev/null || true
 chattr -i /etc/resolv.conf 2>/dev/null || true
@@ -117,11 +116,11 @@ nameserver 1.1.1.1
 EOF
 chattr +i /etc/resolv.conf 2>/dev/null || true
 
-# Отключение TCP Timestamps для маскировки
+# Отключение TCP Timestamps для ма��кировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
 fi
-# Включение TCP BBR для ускорени�� работы SOCKS5
+# Включение TCP BBR для ускорения работы SOCKS5
 if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
@@ -188,9 +187,9 @@ auth:
     $NEW_USER: "$NEW_PASS"
 dns:
   servers:
-    - 8.8.8.8
-    - 9.9.9.9
-    - 1.1.1.1
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+    - https://9.9.9.9/dns-query
 masquerade:
   type: proxy
   proxy:
@@ -296,8 +295,8 @@ else
   fi
   
   if [ "$(yq eval '.dns' "$CONFIG_PATH")" = "null" ]; then
-    echo "🔧 Добавление безопасных DNS в существующий конфиг..."
-    yq -i '.dns.servers = ["8.8.8.8", "9.9.9.9", "1.1.1.1"]' "$CONFIG_PATH"
+    echo "🔧 Добавление безопасных DNS (DoH) в существующий конфиг..."
+    yq -i '.dns.servers = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query"]' "$CONFIG_PATH"
   fi
 
   echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
