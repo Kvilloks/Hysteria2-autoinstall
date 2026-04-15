@@ -339,6 +339,29 @@ ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_P
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
 
+# --- ОТПРАВКА В GOOGLE ТАБЛИЦУ ---
+if [ -n "$WEBHOOK_URL" ]; then
+    echo "📊 Отправка данных в Google Таблицу..."
+    SHEET_IP="${SELECTED_IP}:1080"
+    
+    # Если имя листа не передано, используем дефолтное
+    TARGET_SHEET="${SHEET_NAME:-ДанныепоВДС}"
+    
+    HTTP_RESPONSE=$(curl -s -L -X POST "$WEBHOOK_URL" \
+        -d "sheetName=$TARGET_SHEET" \
+        -d "ip=$SHEET_IP" \
+        -d "user=$NEW_USER" \
+        -d "pass=$NEW_PASS" \
+        -d "hyst=$HYST_LINK" \
+        -d "socks=$SOCKS_LINK")
+        
+    if [[ "$HTTP_RESPONSE" == *"Success"* ]]; then
+        echo "✅ Данные успешно добавлены в таблицу (Лист: $TARGET_SHEET)!"
+    else
+        echo "⚠️ Ошибка отправки в таблицу. Ответ: $HTTP_RESPONSE"
+    fi
+fi
+
 echo ""
 echo "=========================================="
 echo "✅ ПРОКСИ УСПЕШНО УСТАНОВЛЕНЫ!"
