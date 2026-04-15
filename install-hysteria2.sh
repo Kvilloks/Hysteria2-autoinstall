@@ -97,15 +97,29 @@ GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать н��корректно."
+    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
     GATEWAY="127.0.0.1" 
     INTERFACE="eth0"
 fi
 
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
-echo "🥷 Применение глобальных сетевых настроек ядра..."
+echo "🥷 Применение глобальных сетевых настроек ядра и защиты DNS..."
 
-# Отключение TCP Timestamps для макировки
+# Жесткая защита DNS (для защиты SOCKS5 от утечек провайдера хостинга)
+if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
+    echo "🔧 Настройка жесткого DNS (Google) для защиты от утечек..."
+    systemctl stop systemd-resolved 2>/dev/null || true
+    systemctl disable systemd-resolved 2>/dev/null || true
+    chattr -i /etc/resolv.conf 2>/dev/null || true
+    rm -f /etc/resolv.conf
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+    chattr +i /etc/resolv.conf
+else
+    echo "✅ Защита DNS уже настроена."
+fi
+
+# Отключение TCP Timestamps для маскировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
 fi
