@@ -105,7 +105,9 @@ fi
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
 echo "🥷 Применение глобальных сетевых настроек ядра и DNS..."
 
-# ЖЕСТКОЕ удаление DNS-утечек провайдера (убиваем systemd-resolved для resolv.conf)
+# ЖЕСТКОЕ удаление DNS-утечек провайдера
+systemctl stop systemd-resolved 2>/dev/null || true
+systemctl disable systemd-resolved 2>/dev/null || true
 chattr -i /etc/resolv.conf 2>/dev/null || true
 rm -f /etc/resolv.conf
 cat > /etc/resolv.conf <<EOF
@@ -119,7 +121,7 @@ chattr +i /etc/resolv.conf 2>/dev/null || true
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
 fi
-# Включение TCP BBR для ускорения работы SOCKS5
+# Включение TCP BBR для ускорени�� работы SOCKS5
 if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
     echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
     echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
