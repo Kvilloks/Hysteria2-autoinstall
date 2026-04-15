@@ -343,19 +343,19 @@ fi
 
 # --- ОТПРАВКА В GOOGLE ТАБЛИЦУ ---
 if [ -n "$WEBHOOK_URL" ]; then
-    echo "📊 Отправка данн��х в Google Таблицу..."
+    echo "📊 Отправка данных в Google Таблицу..."
     SHEET_IP="${SELECTED_IP}:1080"
     
     # Если имя листа не передано, используем дефолтное
     TARGET_SHEET="${SHEET_NAME:-ДанныепоВДС}"
     
     HTTP_RESPONSE=$(curl -s -L -X POST "$WEBHOOK_URL" \
-        -d "sheetName=$TARGET_SHEET" \
-        -d "ip=$SHEET_IP" \
-        -d "user=$NEW_USER" \
-        -d "pass=$NEW_PASS" \
-        -d "hyst=$HYST_LINK" \
-        -d "socks=$SOCKS_LINK")
+        --data-urlencode "sheetName=$TARGET_SHEET" \
+        --data-urlencode "ip=$SHEET_IP" \
+        --data-urlencode "user=$NEW_USER" \
+        --data-urlencode "pass=$NEW_PASS" \
+        --data-urlencode "hyst=$HYST_LINK" \
+        --data-urlencode "socks=$SOCKS_LINK")
         
     if [[ "$HTTP_RESPONSE" == *"Success"* ]]; then
         echo "✅ Данные успешно добавлены в таблицу (Лист: $TARGET_SHEET)!"
