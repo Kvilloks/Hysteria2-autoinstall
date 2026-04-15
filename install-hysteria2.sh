@@ -14,7 +14,7 @@ case "$ARCH" in
         YQ_ARCH="arm64"
         ;;
     *)
-        echo "❌ Архитектура $ARCH не поддерживается!"
+        echo "❌ Архитектура $ARCH ��е поддерживается!"
         exit 1
         ;;
 esac
@@ -88,9 +88,10 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
 SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
-# Уникальная таблица маршрутизации на основе последнего октета IP
+# Уникальная таблица маршрутизации и маркер на основе последнего октета IP (Защита от коллизий)
 LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
 TABLE_ID=$((200 + LAST_OCTET % 50000))
+MARK_ID=$TABLE_ID # Гарантированно уникальный маркер для каждого IP
 
 # Получаем шлюз и интерфейс для маршрутизации
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -137,24 +138,25 @@ if [ "$SOCKS_CHOICE" == "1" ]; then
 fi
 
 if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
-  echo "📦 Установка зависимостей..."
+  echo "📦 Установка базовых зависимостей..."
   apt update
   apt install -y $PACKAGES
 fi
 
+# Проверка и установка утилиты yq (один раз для всего скрипта)
+if ! command -v yq &> /dev/null; then
+  echo "📥 Установка yq (архитектура $YQ_ARCH)..."
+  wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
+  chmod +x /usr/local/bin/yq
+fi
+
 # --- Установка Hysteria2 ---
 if [ ! -f "/usr/local/bin/hysteria" ]; then
-  if ! command -v yq &> /dev/null; then
-    echo "📥 Установка yq (архитектура $YQ_ARCH)..."
-    wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
-    chmod +x /usr/local/bin/yq
-  fi
-
   echo "⬇️  Получение последней версии Hysteria2..."
   VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
   echo "📥 Скачивание Hysteria2 версия $VERSION (архитектура $HYS_ARCH)..."
-  wget -O /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
+  wget -qO /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
   chmod +x /usr/local/bin/hysteria
 else
   echo "✅ Hysteria2 уже установлен."
@@ -165,13 +167,14 @@ if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
   echo "📦 Компиляция MicroSocks..."
   cd /tmp
   rm -rf microsocks
-  git clone https://github.com/rofl0r/microsocks.git
+  git clone -q https://github.com/rofl0r/microsocks.git
   cd microsocks
-  make
+  make > /dev/null
   cp microsocks /usr/local/bin/
   cd ~
 fi
 
+# --- Логика конфигураций (Создание нового или обновление существующего IP) ---
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
@@ -210,7 +213,6 @@ acl:
 EOF
   chmod 600 "$CONFIG_PATH"
 
-  MARK_ID=$(shuf -i 100-9999 -n 1)      
   DELAY=$(shuf -i 5-12 -n 1)           
   JITTER=$(shuf -i 2-6 -n 1)            
 
@@ -276,12 +278,6 @@ EOF
 
 else
   echo "⚙️  Обновление конфигурации Hysteria2 для IP $SELECTED_IP..."
-  if ! command -v yq &> /dev/null; then
-    apt update
-    apt install -y wget
-    wget -O /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
-    chmod +x /usr/local/bin/yq
-  fi
 
   yq -i '.auth.type = "userpass"' "$CONFIG_PATH"
 
@@ -347,7 +343,7 @@ fi
 
 # --- ОТПРАВКА В GOOGLE ТАБЛИЦУ ---
 if [ -n "$WEBHOOK_URL" ]; then
-    echo "📊 Отправка данных в Google Таблицу..."
+    echo "📊 Отправка данн��х в Google Таблицу..."
     SHEET_IP="${SELECTED_IP}:1080"
     
     # Если имя листа не передано, используем дефолтное
