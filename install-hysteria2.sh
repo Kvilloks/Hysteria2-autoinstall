@@ -97,26 +97,15 @@ GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
+    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать н��корректно."
     GATEWAY="127.0.0.1" 
     INTERFACE="eth0"
 fi
 
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
-echo "🥷 Применение глобальных сетевых настроек ядра и DNS..."
+echo "🥷 Применение глобальных сетевых настроек ядра..."
 
-systemctl stop systemd-resolved 2>/dev/null || true
-systemctl disable systemd-resolved 2>/dev/null || true
-chattr -i /etc/resolv.conf 2>/dev/null || true
-rm -f /etc/resolv.conf
-cat > /etc/resolv.conf <<EOF
-nameserver 8.8.8.8
-nameserver 9.9.9.9
-nameserver 1.1.1.1
-EOF
-chattr +i /etc/resolv.conf 2>/dev/null || true
-
-# Отключение TCP Timestamps для ма��кировки
+# Отключение TCP Timestamps для макировки
 if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
     echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
 fi
@@ -185,11 +174,13 @@ auth:
   type: userpass
   userpass:
     $NEW_USER: "$NEW_PASS"
-dns:
-  servers:
-    - https://1.1.1.1/dns-query
-    - https://8.8.8.8/dns-query
-    - https://9.9.9.9/dns-query
+resolver:
+  type: https
+  https:
+    addr: 8.8.8.8:443
+    timeout: 10s
+    sni: dns.google
+    insecure: false
 masquerade:
   type: proxy
   proxy:
@@ -294,9 +285,13 @@ else
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
   
-  if [ "$(yq eval '.dns' "$CONFIG_PATH")" = "null" ]; then
-    echo "🔧 Добавление безопасных DNS (DoH) в существующий конфиг..."
-    yq -i '.dns.servers = ["https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query"]' "$CONFIG_PATH"
+  if [ "$(yq eval '.resolver' "$CONFIG_PATH")" = "null" ]; then
+    echo "🔧 Добавление безопасных DNS (Google DoH) в существующий конфиг..."
+    yq -i '.resolver.type = "https"' "$CONFIG_PATH"
+    yq -i '.resolver.https.addr = "8.8.8.8:443"' "$CONFIG_PATH"
+    yq -i '.resolver.https.timeout = "10s"' "$CONFIG_PATH"
+    yq -i '.resolver.https.sni = "dns.google"' "$CONFIG_PATH"
+    yq -i '.resolver.https.insecure = false' "$CONFIG_PATH"
   fi
 
   echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
