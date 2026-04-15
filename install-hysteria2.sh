@@ -337,7 +337,13 @@ fi
 # URL-encode пароль правильно
 ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
-SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
+
+# Проверяем, нужно ли генерировать SOCKS5 ссылку
+if [ "$SOCKS_CHOICE" == "1" ]; then
+    SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
+else
+    SOCKS_LINK="-"
+fi
 
 # --- ОТПРАВКА В GOOGLE ТАБЛИЦУ ---
 if [ -n "$WEBHOOK_URL" ]; then
