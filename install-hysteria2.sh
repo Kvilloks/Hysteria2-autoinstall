@@ -14,7 +14,7 @@ case "$ARCH" in
         YQ_ARCH="arm64"
         ;;
     *)
-        echo "❌ Архитектура $ARCH ��е поддерживается!"
+        echo "❌ Архитектура $ARCH не поддерживается!"
         exit 1
         ;;
 esac
@@ -91,7 +91,7 @@ SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 # Уникальная таблица маршрутизации и маркер на основе последнего октета IP (Защита от коллизий)
 LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
 TABLE_ID=$((200 + LAST_OCTET % 50000))
-MARK_ID=$TABLE_ID # Гарантированно уникальный маркер для каждого IP
+MARK_ID=$TABLE_ID
 
 # Получаем шлюз и интерфейс для маршрутизации
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
@@ -106,9 +106,8 @@ fi
 # --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
 echo "🥷 Применение глобальных сетевых настроек ядра и защиты DNS..."
 
-# Жесткая защита DNS (для защиты SOCKS5 от утечек провайдера хостинга)
+# Жесткая защита DNS
 if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
-    echo "🔧 Настройка жесткого DNS (Google) для защиты от утечек..."
     systemctl stop systemd-resolved 2>/dev/null || true
     systemctl disable systemd-resolved 2>/dev/null || true
     chattr -i /etc/resolv.conf 2>/dev/null || true
@@ -116,20 +115,17 @@ if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
     echo "nameserver 8.8.8.8" > /etc/resolv.conf
     echo "nameserver 8.8.4.4" >> /etc/resolv.conf
     chattr +i /etc/resolv.conf
-else
-    echo "✅ Защита DNS уже настроена."
 fi
 
-# Отключение TCP Timestamps для маскировки
-if ! grep -q "^net.ipv4.tcp_timestamps=0" /etc/sysctl.conf; then
-    echo "net.ipv4.tcp_timestamps=0" >> /etc/sysctl.conf
-fi
-# Включение TCP BBR для ускорения работы SOCKS5
-if ! grep -q "^net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
-    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
-    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
-fi
-sysctl -p > /dev/null 2>&1 || true
+# Продвинутые сетевые настройки (BBR, Forwarding, TCP Timestamps, Nonlocal Bind)
+cat > /etc/sysctl.d/99-proxy-tuning.conf <<EOF
+net.ipv4.tcp_timestamps=0
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.ip_forward=1
+net.ipv4.ip_nonlocal_bind=1
+EOF
+sysctl --system > /dev/null 2>&1 || true
 
 # Базовые пакеты
 PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2 e2fsprogs"
@@ -143,7 +139,7 @@ if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f 
   apt install -y $PACKAGES
 fi
 
-# Проверка и установка утилиты yq (один раз для всего скрипта)
+# Проверка и установка утилиты yq
 if ! command -v yq &> /dev/null; then
   echo "📥 Установка yq (архитектура $YQ_ARCH)..."
   wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
@@ -174,7 +170,7 @@ if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
   cd ~
 fi
 
-# --- Логика конфигураций (Создание нового или обновление существующего IP) ---
+# --- Логика конфигураций ---
 if [ ! -f "$CONFIG_PATH" ]; then
   echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
@@ -220,9 +216,11 @@ EOF
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server - $SELECTED_IP
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
+LimitNOFILE=1048576
 ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table $TABLE_ID 2>/dev/null"
 ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table $TABLE_ID"
 ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table $TABLE_ID onlink"
@@ -238,7 +236,8 @@ ExecStartPre=/bin/bash -c "tc qdisc add dev $INTERFACE parent 1:$MARK_ID handle 
 ExecStartPre=/bin/bash -c "tc filter add dev $INTERFACE protocol ip parent 1:0 prio $MARK_ID u32 match ip src $SELECTED_IP flowid 1:$MARK_ID"
 
 ExecStart=/usr/local/bin/hysteria server -c $CONFIG_PATH
-Restart=on-failure
+Restart=always
+RestartSec=5
 User=root
 Environment="GODEBUG=madvdontneed=1"
 
@@ -260,11 +259,14 @@ EOF
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P $NEW_PASS
+LimitNOFILE=1048576
+ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P "$NEW_PASS"
 Restart=always
+RestartSec=5
 User=root
 
 [Install]
@@ -308,17 +310,18 @@ else
   systemctl restart $SERVICE_NAME
   
   if [ "$SOCKS_CHOICE" == "1" ]; then
-    echo "⚠️ ВНИМАНИЕ: Так как вы добавляете юзера на уже существующий IP,"
-    echo "⚠️ Hysteria2 сохранит старых пользователей, но SOCKS5 будет ПЕРЕЗАПИСАН."
-    echo "⚠️ В SOCKS5 теперь будет работать только НОВЫЙ пользователь!"
+    echo "⚠️ ВНИМАНИЕ: SOCKS5 будет перезаписан для этого IP!"
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P $NEW_PASS
+LimitNOFILE=1048576
+ExecStart=/usr/local/bin/microsocks -1 -i $SELECTED_IP -b $SELECTED_IP -p 1080 -u $NEW_USER -P "$NEW_PASS"
 Restart=always
+RestartSec=5
 User=root
 
 [Install]
@@ -330,11 +333,10 @@ EOF
   fi
 fi
 
-# URL-encode пароль правильно
+# URL-encode пароль
 ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
-# Проверяем, нужно ли генерировать SOCKS5 ссылку
 if [ "$SOCKS_CHOICE" == "1" ]; then
     SOCKS_LINK="socks5://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:1080"
 else
@@ -345,8 +347,6 @@ fi
 if [ -n "$WEBHOOK_URL" ]; then
     echo "📊 Отправка данных в Google Таблицу..."
     SHEET_IP="${SELECTED_IP}:1080"
-    
-    # Если имя листа не передано, используем дефолтное
     TARGET_SHEET="${SHEET_NAME:-ДанныепоВДС}"
     
     HTTP_RESPONSE=$(curl -s -L -X POST "$WEBHOOK_URL" \
@@ -385,18 +385,5 @@ if [ "$SOCKS_CHOICE" == "1" ]; then
   echo "$SOCKS_LINK"
 fi
 
-echo "------------------------------------------"
-echo "📁 Расположение конфигураций:"
-echo "Конфиг Hysteria: $CONFIG_PATH"
-if [ "$SOCKS_CHOICE" == "1" ]; then
-  echo "Сервис SOCKS5:   $SOCKS_SERVICE_PATH"
-fi
 echo "=========================================="
 echo ""
-
-if command -v qrencode &> /dev/null; then
-  echo "=== QR-код Hysteria2 для мобильного ==="
-  qrencode -t ANSIUTF8 "$HYST_LINK"
-  echo "======================================="
-  echo ""
-fi
