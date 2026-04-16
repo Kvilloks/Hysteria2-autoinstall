@@ -2,7 +2,7 @@
 
 set -e
 
-# Определение архитектуры сервера
+# Determine server architecture
 ARCH=$(uname -m)
 case "$ARCH" in
     x86_64)
@@ -14,7 +14,7 @@ case "$ARCH" in
         YQ_ARCH="arm64"
         ;;
     *)
-        echo "❌ Архитектура $ARCH не поддерживается!"
+        echo "❌ Architecture $ARCH is not supported!"
         exit 1
         ;;
 esac
@@ -27,15 +27,15 @@ select_ip() {
     IPS=($(get_all_ips))
     
     if [ ${#IPS[@]} -eq 0 ]; then
-        echo "❌ Не найдены публичные IP-адреса."
-        read -p "Введите IP-адрес вручную: " MANUAL_IP
+        echo "❌ No public IP addresses found."
+        read -p "Enter IP address manually: " MANUAL_IP
         echo "$MANUAL_IP"
         return
     fi
     
     echo ""
     echo "=============================="
-    echo "Доступные IP-адреса на сервере:"
+    echo "Available IP addresses on the server:"
     echo "=============================="
     for i in "${!IPS[@]}"; do
         echo "$((i+1)). ${IPS[$i]}"
@@ -51,31 +51,31 @@ IPS=($(get_all_ips))
 select_ip
 
 while true; do
-    read -p "Выберите номер IP (1-${#IPS[@]}): " IP_CHOICE
+    read -p "Select IP number (1-${#IPS[@]}): " IP_CHOICE
     
     if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
         break
     else
-        echo "❌ Ошибка: пожалуйста введите число от 1 до ${#IPS[@]}"
+        echo "❌ Error: please enter a number from 1 to ${#IPS[@]}"
     fi
 done
 
 while true; do
-    read -p "Установить дополнительно SOCKS5 прокси на этот IP? (1 - Да, 0 - Нет): " SOCKS_CHOICE
+    read -p "Install additional SOCKS5 proxy on this IP? (1 - Yes, 0 - No): " SOCKS_CHOICE
     if [[ "$SOCKS_CHOICE" == "0" || "$SOCKS_CHOICE" == "1" ]]; then
         break
     else
-        echo "❌ Ошибка: введите 1 (Да) или 0 (Нет)."
+        echo "❌ Error: enter 1 (Yes) or 0 (No)."
     fi
 done
 
 echo ""
-echo "✅ Выбран IP: $SELECTED_IP"
+echo "✅ Selected IP: $SELECTED_IP"
 if [ "$SOCKS_CHOICE" == "1" ]; then
-    echo "✅ SOCKS5: Будет установлен"
+    echo "✅ SOCKS5: Will be installed"
 else
-    echo "✅ SOCKS5: Установка пропущена"
+    echo "✅ SOCKS5: Installation skipped"
 fi
 echo ""
 
@@ -88,25 +88,25 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
 SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
-# Уникальная таблица маршрутизации и маркер на основе последнего октета IP (Защита от коллизий)
+# Unique routing table and marker based on the last IP octet (Collision protection)
 LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
 TABLE_ID=$((200 + LAST_OCTET % 50000))
 MARK_ID=$TABLE_ID
 
-# Получаем шлюз и интерфейс для маршрутизации
+# Get gateway and interface for routing
 GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠️ Внимание: Не удалось определить шлюз. Маршрутизация может работать некорректно."
+    echo "⚠️ Warning: Failed to determine gateway. Routing may not work correctly."
     GATEWAY="127.0.0.1" 
     INTERFACE="eth0"
 fi
 
-# --- ГЛОБАЛЬНЫЙ АНТИДЕТЕКТ ОС И СЕТЕВЫЕ ОПТИМИЗАЦИИ ---
-echo "🥷 Применение глобальных сетевых настроек ядра и защиты DNS..."
+# --- GLOBAL ANTI-DETECT OS & NETWORK OPTIMIZATIONS ---
+echo "🥷 Applying global kernel network settings and DNS protection..."
 
-# Жесткая защита DNS
+# Strict DNS protection
 if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
     systemctl stop systemd-resolved 2>/dev/null || true
     systemctl disable systemd-resolved 2>/dev/null || true
@@ -117,7 +117,7 @@ if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
     chattr +i /etc/resolv.conf
 fi
 
-# Продвинутые сетевые настройки (BBR, Forwarding, TCP Timestamps, Nonlocal Bind)
+# Advanced network settings (BBR, Forwarding, TCP Timestamps, Nonlocal Bind)
 cat > /etc/sysctl.d/99-proxy-tuning.conf <<EOF
 net.ipv4.tcp_timestamps=0
 net.core.default_qdisc=fq
@@ -127,40 +127,40 @@ net.ipv4.ip_nonlocal_bind=1
 EOF
 sysctl --system > /dev/null 2>&1 || true
 
-# Базовые пакеты
+# Base packages
 PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2 e2fsprogs"
 if [ "$SOCKS_CHOICE" == "1" ]; then
     PACKAGES="$PACKAGES build-essential git"
 fi
 
 if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
-  echo "📦 Установка базовых зависимостей..."
+  echo "📦 Installing base dependencies..."
   apt update
   apt install -y $PACKAGES
 fi
 
-# Проверка и установка утилиты yq
+# Check and install yq utility
 if ! command -v yq &> /dev/null; then
-  echo "📥 Установка yq (архитектура $YQ_ARCH)..."
+  echo "📥 Installing yq ($YQ_ARCH architecture)..."
   wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
   chmod +x /usr/local/bin/yq
 fi
 
-# --- Установка Hysteria2 ---
+# --- Hysteria2 Installation ---
 if [ ! -f "/usr/local/bin/hysteria" ]; then
-  echo "⬇️  Получение последней версии Hysteria2..."
+  echo "⬇️  Fetching the latest Hysteria2 version..."
   VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
 
-  echo "📥 Скачивание Hysteria2 версия $VERSION (архитектура $HYS_ARCH)..."
+  echo "📥 Downloading Hysteria2 version $VERSION ($HYS_ARCH architecture)..."
   wget -qO /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
   chmod +x /usr/local/bin/hysteria
 else
-  echo "✅ Hysteria2 уже установлен."
+  echo "✅ Hysteria2 is already installed."
 fi
 
-# --- Установка SOCKS5 (microsocks) ---
+# --- SOCKS5 (microsocks) Installation ---
 if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
-  echo "📦 Компиляция MicroSocks..."
+  echo "📦 Compiling MicroSocks..."
   cd /tmp
   rm -rf microsocks
   git clone -q https://github.com/rofl0r/microsocks.git
@@ -170,14 +170,14 @@ if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
   cd ~
 fi
 
-# --- Логика конфигураций ---
+# --- Configuration Logic ---
 if [ ! -f "$CONFIG_PATH" ]; then
-  echo "🔐 Генерация сертификата для IP $SELECTED_IP..."
+  echo "🔐 Generating certificate for IP $SELECTED_IP..."
   mkdir -p /etc/hysteria
   openssl req -x509 -newkey rsa:2048 -days 3650 -nodes -keyout "$KEY_PATH" -out "$CERT_PATH" -subj "/CN=$SELECTED_IP" 2>/dev/null
   chmod 600 "$KEY_PATH"
 
-  echo "⚙️  Создание конфигурации Hysteria2..."
+  echo "⚙️  Creating Hysteria2 configuration..."
   cat > "$CONFIG_PATH" <<EOF
 listen: $SELECTED_IP:443
 tls:
@@ -212,7 +212,7 @@ EOF
   DELAY=$(shuf -i 5-12 -n 1)           
   JITTER=$(shuf -i 2-6 -n 1)            
 
-  echo "🔧 Создание systemd-сервиса Hysteria2 (Анти-Детект) для IP $SELECTED_IP..."
+  echo "🔧 Creating Hysteria2 systemd service (Anti-Detect) for IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
 [Unit]
 Description=Hysteria2 Server - $SELECTED_IP
@@ -251,11 +251,11 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  echo "🚀 Запуск Hysteria2 на IP $SELECTED_IP..."
+  echo "🚀 Starting Hysteria2 on IP $SELECTED_IP..."
   systemctl enable --now $SERVICE_NAME
 
   if [ "$SOCKS_CHOICE" == "1" ]; then
-    echo "🔧 Создание systemd-сервиса SOCKS5 для IP $SELECTED_IP..."
+    echo "🔧 Creating SOCKS5 systemd service for IP $SELECTED_IP..."
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
@@ -274,12 +274,12 @@ WantedBy=multi-user.target
 EOF
     chmod 600 "$SOCKS_SERVICE_PATH"
     systemctl daemon-reload
-    echo "🚀 Запуск SOCKS5 на IP $SELECTED_IP..."
+    echo "🚀 Starting SOCKS5 on IP $SELECTED_IP..."
     systemctl enable --now $SOCKS_SERVICE_NAME
   fi
 
 else
-  echo "⚙️  Обновление конфигурации Hysteria2 для IP $SELECTED_IP..."
+  echo "⚙️  Updating Hysteria2 configuration for IP $SELECTED_IP..."
 
   yq -i '.auth.type = "userpass"' "$CONFIG_PATH"
 
@@ -292,13 +292,13 @@ else
   fi
 
   if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
-    echo "🔧 Добавление привязки IP (outbounds) в существующий конфиг..."
+    echo "🔧 Adding IP bind (outbounds) to the existing config..."
     yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
     yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
   fi
   
   if [ "$(yq eval '.resolver' "$CONFIG_PATH")" = "null" ]; then
-    echo "🔧 Добавление безопасных DNS (Google DoH) в существующий конфиг..."
+    echo "🔧 Adding secure DNS (Google DoH) to the existing config..."
     yq -i '.resolver.type = "https"' "$CONFIG_PATH"
     yq -i '.resolver.https.addr = "8.8.8.8:443"' "$CONFIG_PATH"
     yq -i '.resolver.https.timeout = "10s"' "$CONFIG_PATH"
@@ -306,11 +306,11 @@ else
     yq -i '.resolver.https.insecure = false' "$CONFIG_PATH"
   fi
 
-  echo "🔄 Перезапуск Hysteria2 для IP $SELECTED_IP..."
+  echo "🔄 Restarting Hysteria2 for IP $SELECTED_IP..."
   systemctl restart $SERVICE_NAME
   
   if [ "$SOCKS_CHOICE" == "1" ]; then
-    echo "⚠️ ВНИМАНИЕ: SOCKS5 будет перезаписан для этого IP!"
+    echo "⚠️ WARNING: SOCKS5 will be overwritten for this IP!"
     cat > "$SOCKS_SERVICE_PATH" <<EOF
 [Unit]
 Description=MicroSocks Server - $SELECTED_IP
@@ -333,7 +333,7 @@ EOF
   fi
 fi
 
-# URL-encode пароль
+# URL-encode password
 ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
@@ -343,51 +343,60 @@ else
     SOCKS_LINK="-"
 fi
 
-# --- ОТПРАВКА В GOOGLE ТАБЛИЦУ ---
+# --- SEND TO GOOGLE SHEETS ---
 if [ -n "$WEBHOOK_URL" ]; then
-    echo "📊 Отправка данных в Google Таблицу..."
+    echo "📊 Sending data to Google Sheets..."
     SHEET_IP="${SELECTED_IP}:1080"
-    TARGET_SHEET="${SHEET_NAME:-ДанныепоВДС}"
     
-    HTTP_RESPONSE=$(curl -s -L -X POST "$WEBHOOK_URL" \
-        --data-urlencode "sheetName=$TARGET_SHEET" \
-        --data-urlencode "ip=$SHEET_IP" \
-        --data-urlencode "user=$NEW_USER" \
-        --data-urlencode "pass=$NEW_PASS" \
-        --data-urlencode "hyst=$HYST_LINK" \
+    # Base curl command
+    CURL_CMD=(curl -s -L -X POST "$WEBHOOK_URL"
+        --data-urlencode "ip=$SHEET_IP"
+        --data-urlencode "user=$NEW_USER"
+        --data-urlencode "pass=$NEW_PASS"
+        --data-urlencode "hyst=$HYST_LINK"
         --data-urlencode "socks=$SOCKS_LINK")
+    
+    # Append sheetName only if SHEET_NAME variable is provided
+    if [ -n "$SHEET_NAME" ]; then
+        CURL_CMD+=(--data-urlencode "sheetName=$SHEET_NAME")
+        TARGET_SHEET="$SHEET_NAME"
+    else
+        TARGET_SHEET="Default Sheet"
+    fi
+        
+    HTTP_RESPONSE=$("${CURL_CMD[@]}")
         
     if [[ "$HTTP_RESPONSE" == *"Success"* ]]; then
-        echo "✅ Данные успешно добавлены в таблицу (Лист: $TARGET_SHEET)!"
+        echo "✅ Data successfully added to the sheet ($TARGET_SHEET)!"
     else
-        echo "⚠️ Ошибка отправки в таблицу. Ответ: $HTTP_RESPONSE"
+        echo "⚠️ Error sending to sheet. Response: $HTTP_RESPONSE"
     fi
 fi
 
 echo ""
 echo "=========================================="
-echo "✅ ПРОКСИ УСПЕШНО УСТАНОВЛЕНЫ!"
+echo "✅ PROXY SUCCESSFULLY INSTALLED!"
 echo "=========================================="
-echo "IP Адрес:     $SELECTED_IP"
-echo "Пользователь: $NEW_USER"
-echo "Пароль:       $NEW_PASS"
+echo "IP Address:   $SELECTED_IP"
+echo "User:         $NEW_USER"
+echo "Password:     $NEW_PASS"
 echo "------------------------------------------"
-echo "🟢 Hysteria2 (Порт: 443)"
-echo "Сервис:       $SERVICE_NAME"
-echo "Ссылка:"
+echo "🟢 Hysteria2 (Port: 443)"
+echo "Service:      $SERVICE_NAME"
+echo "Link:"
 echo "$HYST_LINK"
 
 if [ "$SOCKS_CHOICE" == "1" ]; then
   echo "------------------------------------------"
-  echo "🟡 SOCKS5 (Порт: 1080)"
-  echo "Сервис:       $SOCKS_SERVICE_NAME"
-  echo "Ссылка:"
+  echo "🟡 SOCKS5 (Port: 1080)"
+  echo "Service:      $SOCKS_SERVICE_NAME"
+  echo "Link:"
   echo "$SOCKS_LINK"
 fi
 
 echo "=========================================="
 if command -v qrencode &> /dev/null; then
-  echo "=== QR-код Hysteria2 для мобильного ==="
+  echo "=== Hysteria2 QR Code for Mobile ==="
   qrencode -t ANSIUTF8 "$HYST_LINK"
   echo "======================================="
   echo ""
