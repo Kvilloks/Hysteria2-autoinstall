@@ -1,44 +1,32 @@
-# Hysteria2 Multi-IP Installer
+# Hysteria2 + SOCKS5 Proxy Farm Auto-Installer 🚀
 
-A Bash script for automated deployment of Hysteria2 proxy servers on Linux servers with multiple IP addresses. The script resolves outbound traffic routing issues and applies network-level tweaks to hide proxy usage (Anti-Detect features).
+A production-ready bash script to deploy a robust, anti-detect proxy farm (Hysteria2 & MicroSocks) on Linux servers with multiple IPs. Designed specifically to bypass advanced anti-fraud systems and game anti-cheats (perfect for AdsPower and bot farms).
 
-## Features
+## ✨ Key Features
+*   **Multi-IP Architecture:** Automatically creates isolated routing tables for each IP address to prevent collisions.
+*   **Advanced Anti-Detect:** TCP BBR, TTL=128 (Windows OS spoofing), and locked DNS to prevent provider leaks.
+*   **Network Obfuscation:** Injects randomized ping delay (5-12ms) and jitter (2-6ms) via `tc netem` to perfectly mimic residential ISP connections.
+*   **Google Sheets Export:** Automatically sends generated credentials and proxy links directly to your Google Sheet via Webhook.
+*   **High Availability:** Tuned system limits (`LimitNOFILE`, `ip_nonlocal_bind`, `network-online.target`) to survive reboots and handle high loads.
 
-*   **Isolated Routing:** Automatically configures `ip rule` and `ip route` (Policy Routing). This ensures that outbound traffic strictly routes through the specific IP address bound to the given Hysteria2 instance.
-*   **TCP/IP Fingerprint Spoofing:**
-    *   Modifies the outbound TTL to 128 (Windows standard) using `iptables`.
-    *   Globally disables `tcp_timestamps` via `sysctl` to hide Linux kernel markers.
-*   **Timing Analysis Protection:** Utilizes the `tc netem` kernel module to generate a unique static latency and jitter for each IP address.
-*   **Process Isolation:** Each IP address is managed by its own dedicated systemd service. Network rules are applied dynamically on service start (`ExecStartPre`) and cleanly removed on stop (`ExecStopPost`).
-*   **User Management:** Seamlessly appends new users to an existing configuration without overwriting current settings.
-*   **Architecture Support:** Compatible with x86_64 (amd64) and aarch64 (arm64).
+## ⚙️ Quick Start
 
-## Requirements
+Run the script as `root` on your Ubuntu/Debian server.
 
-*   OS: Debian 11+ / Ubuntu 20.04+ (or derivatives).
-*   Permissions: `root` access.
-*   Network: Additional IP addresses must be pre-configured on the server's network interface prior to running the script.
-
-## Installation and Run
-
-You can download and execute the script in a single command with root privileges:
-
+### Option 1: Standard Installation (Local output only)
 ```bash
-curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && /tmp/install-hysteria2.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh)
 ```
 
-## Usage
+### Option 2: Installation with Google Sheets Export (Recommended)
+To automatically save proxy credentials to your Google Sheet, pass the `WEBHOOK_URL` and `SHEET_NAME` variables:
 
-1. Upon launch, the script will scan the network interfaces and list all available IPv4 addresses.
-2. Enter the index number corresponding to the desired IP address.
-3. The script will automatically install dependencies (e.g., `yq`, `qrencode`, `iptables`), generate an SSL certificate, and create the configuration file.
-4. Access credentials, a URI link (`hysteria2://...`), and a QR code for client configuration will be printed in the terminal.
+```bash
+curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && WEBHOOK_URL="YOUR_WEBHOOK_URL_HERE" SHEET_NAME="Sheet1" /tmp/install-hysteria2.sh
+```
 
-To add another user to an already configured IP address, run the script again and select the same IP. The script will update the configuration accordingly.
-
-## Traffic Masking Verification
-
-You can verify the network fingerprint spoofing using traffic profilers:
-1. Connect to the proxy from your client device.
-2. Open the [BrowserLeaks IP Test](https://browserleaks.com/ip).
-3. Scroll to the **TCP/IP Fingerprint** section. The **OS Type** should identify the traffic as `Windows` or `Windows NT`, instead of Linux or Android.
+## 📋 How it works
+1. The script scans your server and prompts you to select an available IP address.
+2. Asks if you want to install an additional SOCKS5 proxy on that specific IP.
+3. Generates a random username and secure base64 password.
+4. Configures systemd services, applies anti-detect network rules, and outputs (or exports) the final connection links and QR codes.
