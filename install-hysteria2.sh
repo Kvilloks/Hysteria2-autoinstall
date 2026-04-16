@@ -386,4 +386,10 @@ if [ "$SOCKS_CHOICE" == "1" ]; then
 fi
 
 echo "=========================================="
+if command -v qrencode &> /dev/null; then
+  echo "=== QR-код Hysteria2 для мобильного ==="
+  qrencode -t ANSIUTF8 "$HYST_LINK"
+  echo "======================================="
+  echo ""
+fi
 echo ""
