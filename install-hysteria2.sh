@@ -90,7 +90,8 @@ SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
 # Unique routing table and marker based on the last IP octet (Collision protection)
 # Уникальная таблица и маркер на основе хэша от полного IP-адреса (100% защита от коллизий)
-TABLE_ID=$(echo "$SELECTED_IP" | cksum | awk '{print ($1 % 60000) + 1000}')
+# Уникальный ID от 1000 до 8999 (безопасно и для iproute2, и для HEX-парсера tc)
+TABLE_ID=$(echo "$SELECTED_IP" | cksum | awk '{print ($1 % 8000) + 1000}')
 MARK_ID=$TABLE_ID
 
 # Get gateway and interface for routing
