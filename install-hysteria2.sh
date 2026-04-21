@@ -210,7 +210,7 @@ EOF
   chmod 600 "$CONFIG_PATH"
 
   DELAY=$(shuf -i 5-12 -n 1)           
-  JITTER=$(shuf -i 2-6 -n 1)            
+             
 
   echo "🔧 Creating Hysteria2 systemd service (Anti-Detect) for IP $SELECTED_IP..."
   cat > "$SERVICE_PATH" <<EOF
