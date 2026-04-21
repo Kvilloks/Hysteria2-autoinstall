@@ -209,7 +209,7 @@ acl:
 EOF
   chmod 600 "$CONFIG_PATH"
 
-  DELAY=$(shuf -i 5-12 -n 1)           
+  DELAY=$(shuf -i 4-15 -n 1)           
              
 
   echo "🔧 Creating Hysteria2 systemd service (Anti-Detect) for IP $SELECTED_IP..."
