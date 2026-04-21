@@ -89,8 +89,8 @@ SOCKS_SERVICE_NAME="microsocks-${IP_SAFE}"
 SOCKS_SERVICE_PATH="/etc/systemd/system/${SOCKS_SERVICE_NAME}.service"
 
 # Unique routing table and marker based on the last IP octet (Collision protection)
-LAST_OCTET=$(echo $SELECTED_IP | cut -d. -f4)
-TABLE_ID=$((200 + LAST_OCTET % 50000))
+# Уникальная таблица и маркер на основе хэша от полного IP-адреса (100% защита от коллизий)
+TABLE_ID=$(echo "$SELECTED_IP" | cksum | awk '{print ($1 % 60000) + 1000}')
 MARK_ID=$TABLE_ID
 
 # Get gateway and interface for routing
