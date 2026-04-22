@@ -1,32 +1,81 @@
-# Hysteria2 + SOCKS5 Proxy Farm Auto-Installer 🚀
+# Hysteria2-autoinstall
 
-A production-ready bash script to deploy a robust, anti-detect proxy farm (Hysteria2 & MicroSocks) on Linux servers with multiple IPs. Designed specifically to bypass advanced anti-fraud systems and game anti-cheats (perfect for AdsPower and bot farms).
+Automatic installer for [Hysteria2](https://github.com/apernet/hysteria) server with multi-IP support, SOCKS5 integration, and anti-fingerprint network optimizations for Linux (Debian/Ubuntu).
 
-## ✨ Key Features
-*   **Multi-IP Architecture:** Automatically creates isolated routing tables for each IP address to prevent collisions.
-*   **Advanced Anti-Detect:** TCP BBR, TTL=128 (Windows OS spoofing), and locked DNS to prevent provider leaks.
-*   **Network Obfuscation:** Injects randomized ping delay (5-12ms) and jitter (2-6ms) via `tc netem` to perfectly mimic residential ISP connections.
-*   **Google Sheets Export:** Automatically sends generated credentials and proxy links directly to your Google Sheet via Webhook.
-*   **High Availability:** Tuned system limits (`LimitNOFILE`, `ip_nonlocal_bind`, `network-online.target`) to survive reboots and handle high loads.
+## Features
 
-## ⚙️ Quick Start
+- Automatic detection and selection of public IP for the service
+- Generates a unique user and strong password
+- Optionally sets up a standalone SOCKS5 proxy on the chosen IP
+- Automatically generates a TLS certificate for the selected IP
+- Safe to run multiple times: adds new IPs and users or modifies SOCKS5 settings
+- Anti-fingerprint global system networking tweaks (BBR, DNS, TTL, iptables, tc)
+- Installs all needed dependencies automatically on first run
+- Shows ready-to-use connection links and a QR code (for mobile clients)
+- Optionally sends proxy data to Google Sheets via webhook
 
-Run the script as `root` on your Ubuntu/Debian server.
+---
 
-### Option 1: Standard Installation (Local output only)
+## Quick Start (one-liner installation)
+
+**1. With Google Sheets integration**  
+(replace `YOUR_WEBHOOK_URL` and `YOUR_SHEET` with your values)
+
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh)
+curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && WEBHOOK_URL="YOUR_WEBHOOK_URL" SHEET_NAME="YOUR_SHEET" /tmp/install-hysteria2.sh
 ```
 
-### Option 2: Installation with Google Sheets Export (Recommended)
-To automatically save proxy credentials to your Google Sheet, pass the `WEBHOOK_URL` and `SHEET_NAME` variables:
+**2. Without Google Sheets integration**
 
 ```bash
-curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && WEBHOOK_URL="YOUR_WEBHOOK_URL_HERE" SHEET_NAME="Sheet1" /tmp/install-hysteria2.sh
+curl -k -fsSL https://raw.githubusercontent.com/Kvilloks/Hysteria2-autoinstall/main/install-hysteria2.sh -o /tmp/install-hysteria2.sh && chmod +x /tmp/install-hysteria2.sh && /tmp/install-hysteria2.sh
 ```
 
-## 📋 How it works
-1. The script scans your server and prompts you to select an available IP address.
-2. Asks if you want to install an additional SOCKS5 proxy on that specific IP.
-3. Generates a random username and secure base64 password.
-4. Configures systemd services, applies anti-detect network rules, and outputs (or exports) the final connection links and QR codes.
+> All required dependencies will be installed automatically.
+
+---
+
+## How it works
+
+1. The script detects all public IP addresses on your server and prompts you to select one.
+2. Generates a secure username and password.
+3. Installs and configures Hysteria2 and, optionally, a SOCKS5 proxy bound to the selected IP.
+4. Applies secure DNS and network tuning for better anonymity and performance.
+5. All settings are saved and loaded as independent systemd services.
+6. At the end, ready-to-use connection links and a QR code are shown in the console.
+
+---
+
+## Updating & Re-running
+
+- Rerun the script anytime to add a new configuration for another IP, generate a new user, or modify SOCKS5 parameters.
+- All configurations, certificates, services, and passwords are generated and stored separately for each selected IP.
+
+---
+
+## Example connection links
+
+- **Hysteria2:**  
+  `hysteria2://USER:PASSWORD@IP:443/?insecure=1`
+
+- **SOCKS5:**  
+  `socks5://USER:PASSWORD@IP:1080`
+
+- A QR code for Hysteria2 is also printed in the console (if `qrencode` is installed).
+
+---
+
+## Requirements
+
+- Linux (Ubuntu/Debian; root access required)
+- Network interface with public IP (VPS, dedicated, etc.)
+- For QR code display — `qrencode` (will be installed if missing)
+
+---
+
+## Links
+
+- [Hysteria2 project (upstream)](https://github.com/apernet/hysteria)
+- [MicroSocks project (SOCKS5 proxy)](https://github.com/rofl0r/microsocks)
+
+
