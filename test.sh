@@ -1,92 +1,4 @@
-Почти всё ок, но есть **3 реальных бага** и **2 улучшения** которые стоит исправить.
-
----
-
-## 🔴 Баги
-
-### 1. `set -e` убьёт скрипт если нет ни одного `.service` файла
-
-```bash
-for SERVICE_FILE in /etc/systemd/system/hysteria-server-*.service; do
-    [ -f "$SERVICE_FILE" ] || continue  # ✅ эта строка есть, но...
-```
-
-При `set -e` glob `hysteria-server-*.service` который ничего не нашёл возвращает **буквальную строку** с `*` — `[ -f ... ]` вернёт `false` → `continue` сработает → **всё ок**. Этот баг на самом деле закрыт, но только благодаря `|| continue`. ✅
-
-### 2. `local` внутри цикла не сбрасывает переменную между итерациями
-
-```bash
-# ❌ Проблема: local объявляется внутри цикла for,
-# но в bash local работает на уровне функции,
-# значение от предыдущей итерации может протечь
-local SERVICE_NAME
-local IP_SAFE SERVICE_IP
-```
-
-Нужно объявить переменные **один раз** до цикла:
-
-```bash
-cleanup_dead_services() {
-    local FOUND_DEAD=0
-    local SERVICE_FILE SERVICE_NAME IP_SAFE SERVICE_IP  # ← сюда, до цикла
-    local SOCKS_SERVICE TABLE_ID MARK_ID
-    local GW IFACE
-    ...
-    for SERVICE_FILE in ...; do
-        SERVICE_NAME=$(...)   # без повторного local
-        IP_SAFE=$(...)
-        ...
-    done
-}
-```
-
-### 3. 🔴 Критичный: `iptables -D` может не удалить **дублирующиеся** правила
-
-В install-части при каждом рестарте сервиса выполняется:
-```bash
-ExecStartPre=/bin/bash -c "iptables -t mangle -A POSTROUTING -s $IP -j TTL --ttl-set 128"
-```
-`-A` **добавляет**, а не заменяет. Если сервис рестартовал 10 раз — правило добавилось **10 раз**. Твой cleanup делает только одно `-D` → **остаются 9 дублей**.
-
-Фикс в `cleanup_dead_services()`:
-```bash
-# ❌ Было:
-iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" -j TTL --ttl-set 128 2>/dev/null || true
-
-# ✅ Стало — удаляем все дубли в цикле:
-while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" -j TTL --ttl-set 128 2>/dev/null; do
-    true
-done
-```
-
----
-
-## 🟡 Улучшения
-
-### 4. В install-части `ExecStartPre` тоже надо исправить `-A` на идемпотентную проверку
-
-```bash
-# ❌ Было (множит правила при каждом рестарте):
-ExecStartPre=/bin/bash -c "iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
-
-# ✅ Стало:
-ExecStartPre=/bin/bash -c "iptables -t mangle -C POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null || iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
-```
-> `-C` = check, возвращает 0 если правило **уже есть** → тогда `-A` не вызывается
-
-### 5. `ip rule add` тоже дублируется при рестартах
-
-```bash
-# ❌ Было:
-ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table $TABLE_ID 2>/dev/null"
-ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table $TABLE_ID"
-# del + add — это правильно! ✅ Здесь уже идемпотентно.
-```
-Здесь всё ок — del перед add уже защищает от дублей. ✅
-
----
-
-## ✅ Итоговый исправленный скрипт
+Да, вот финальный скрипт со всеми исправлениями включая `modprobe`, `flock` для tc, и все предыдущие фиксы:
 
 ```bash
 #!/bin/bash
@@ -118,7 +30,6 @@ get_all_ips() {
 # AUTO-CLEANUP: Remove services for deleted IPs
 # ============================================================
 cleanup_dead_services() {
-    # Declare all locals at function scope (not inside loop)
     local FOUND_DEAD=0
     local SERVICE_FILE SERVICE_NAME IP_SAFE SERVICE_IP
     local SOCKS_SERVICE TABLE_ID MARK_ID
@@ -139,7 +50,6 @@ cleanup_dead_services() {
         IP_SAFE=$(echo "$SERVICE_NAME" | sed 's/hysteria-server-//')
         SERVICE_IP=$(echo "$IP_SAFE" | tr '_' '.')
 
-        # Skip if IP is still active on the server
         if [ "${ACTIVE_IPS_MAP[$SERVICE_IP]+_}" ]; then
             continue
         fi
@@ -176,13 +86,15 @@ cleanup_dead_services() {
         if [ -n "$IFACE" ]; then
             ip rule del from "$SERVICE_IP" table "$TABLE_ID" 2>/dev/null || true
 
-            # ✅ Удаляем ВСЕ дубли iptables правила (не только одно)
-            while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" -j TTL --ttl-set 128 2>/dev/null; do
+            # Remove ALL duplicate iptables rules in a loop
+            while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" \
+                  -j TTL --ttl-set 128 2>/dev/null; do
                 true
             done
 
-            tc filter del dev "$IFACE" protocol ip parent 1:0 prio "$MARK_ID" 2>/dev/null || true
-            tc class  del dev "$IFACE" classid "1:${MARK_ID}"                 2>/dev/null || true
+            tc filter del dev "$IFACE" protocol ip parent 1:0 \
+               prio "$MARK_ID" 2>/dev/null || true
+            tc class  del dev "$IFACE" classid "1:${MARK_ID}" 2>/dev/null || true
         fi
 
         echo "   ✅ Fully cleaned: $SERVICE_IP"
@@ -233,7 +145,9 @@ select_ip
 
 while true; do
     read -p "Select IP number (1-${#IPS[@]}): " IP_CHOICE
-    if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
+    if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && \
+       [ "$IP_CHOICE" -ge 1 ] && \
+       [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
         SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
         break
     else
@@ -259,7 +173,7 @@ else
 fi
 echo ""
 
-IP_SAFE=$(echo $SELECTED_IP | tr '.' '_')
+IP_SAFE=$(echo "$SELECTED_IP" | tr '.' '_')
 CONFIG_PATH="/etc/hysteria/config_${IP_SAFE}.yaml"
 CERT_PATH="/etc/hysteria/cert_${IP_SAFE}.pem"
 KEY_PATH="/etc/hysteria/key_${IP_SAFE}.pem"
@@ -280,6 +194,7 @@ if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
     INTERFACE="eth0"
 fi
 
+# --- GLOBAL ANTI-DETECT OS & NETWORK OPTIMIZATIONS ---
 echo "🥷 Applying global kernel network settings and DNS protection..."
 
 if ! grep -q "nameserver 8.8.8.8" /etc/resolv.conf 2>/dev/null; then
@@ -301,33 +216,47 @@ net.ipv4.ip_nonlocal_bind=1
 EOF
 sysctl --system > /dev/null 2>&1 || true
 
+# Base packages
 PACKAGES="wget curl tar openssl qrencode python3 iptables iproute2 e2fsprogs"
 if [ "$SOCKS_CHOICE" == "1" ]; then
     PACKAGES="$PACKAGES build-essential git"
 fi
 
-if [ ! -f "/usr/local/bin/hysteria" ] || { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
+if [ ! -f "/usr/local/bin/hysteria" ] || \
+   { [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; }; then
     echo "📦 Installing base dependencies..."
     apt update
     apt install -y $PACKAGES
 fi
 
+# Load required kernel modules (fix for minimal VDS images)
+echo "🔧 Loading required kernel modules..."
+modprobe xt_TTL   2>/dev/null || true
+modprobe xt_tcpudp 2>/dev/null || true
+modprobe sch_netem 2>/dev/null || true
+modprobe sch_htb   2>/dev/null || true
+
 if ! command -v yq &> /dev/null; then
     echo "📥 Installing yq ($YQ_ARCH architecture)..."
-    wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
+    wget -qO /usr/local/bin/yq \
+        "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${YQ_ARCH}"
     chmod +x /usr/local/bin/yq
 fi
 
+# --- Hysteria2 Installation ---
 if [ ! -f "/usr/local/bin/hysteria" ]; then
     echo "⬇️  Fetching the latest Hysteria2 version..."
-    VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+    VERSION=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest \
+              | grep '"tag_name":' | cut -d'"' -f4)
     echo "📥 Downloading Hysteria2 version $VERSION ($HYS_ARCH architecture)..."
-    wget -qO /usr/local/bin/hysteria "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
+    wget -qO /usr/local/bin/hysteria \
+        "https://github.com/apernet/hysteria/releases/download/${VERSION}/hysteria-linux-${HYS_ARCH}"
     chmod +x /usr/local/bin/hysteria
 else
     echo "✅ Hysteria2 is already installed."
 fi
 
+# --- SOCKS5 (microsocks) Installation ---
 if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
     echo "📦 Compiling MicroSocks..."
     cd /tmp
@@ -339,6 +268,7 @@ if [ "$SOCKS_CHOICE" == "1" ] && [ ! -f "/usr/local/bin/microsocks" ]; then
     cd ~
 fi
 
+# --- Configuration Logic ---
 if [ ! -f "$CONFIG_PATH" ]; then
     echo "🔐 Generating certificate for IP $SELECTED_IP..."
     mkdir -p /etc/hysteria
@@ -390,15 +320,15 @@ Wants=network-online.target
 
 [Service]
 LimitNOFILE=1048576
+
 ExecStartPre=-/bin/bash -c "ip rule del from $SELECTED_IP table $TABLE_ID 2>/dev/null"
 ExecStartPre=/bin/bash -c "ip rule add from $SELECTED_IP table $TABLE_ID"
 ExecStartPre=/bin/bash -c "ip route replace default via $GATEWAY dev $INTERFACE table $TABLE_ID onlink"
 
-# ✅ Идемпотентное добавление TTL правила (без дублей)
 ExecStartPre=/bin/bash -c "iptables -t mangle -C POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128 2>/dev/null || iptables -t mangle -A POSTROUTING -s $SELECTED_IP -j TTL --ttl-set 128"
 
-ExecStartPre=-/bin/bash -c "tc qdisc show dev $INTERFACE | grep -q 'htb' || tc qdisc add dev $INTERFACE root handle 1: htb default 10"
-ExecStartPre=-/bin/bash -c "tc class show dev $INTERFACE | grep -q 'classid 1:10' || tc class add dev $INTERFACE parent 1: classid 1:10 htb rate 1000mbit"
+ExecStartPre=/bin/bash -c "flock /tmp/tc-setup.lock -c 'tc qdisc show dev $INTERFACE | grep -q htb || tc qdisc add dev $INTERFACE root handle 1: htb default 10'"
+ExecStartPre=/bin/bash -c "flock /tmp/tc-setup.lock -c 'tc class show dev $INTERFACE | grep -q \"classid 1:10\" || tc class add dev $INTERFACE parent 1: classid 1:10 htb rate 1000mbit'"
 ExecStartPre=-/bin/bash -c "tc class del dev $INTERFACE classid 1:$MARK_ID 2>/dev/null"
 ExecStartPre=/bin/bash -c "tc class add dev $INTERFACE parent 1: classid 1:$MARK_ID htb rate 1000mbit"
 ExecStartPre=/bin/bash -c "tc qdisc add dev $INTERFACE parent 1:$MARK_ID handle $MARK_ID: netem delay ${DELAY}ms"
@@ -421,7 +351,7 @@ EOF
 
     systemctl daemon-reload
     echo "🚀 Starting Hysteria2 on IP $SELECTED_IP..."
-    systemctl enable --now $SERVICE_NAME
+    systemctl enable --now "$SERVICE_NAME"
 
     if [ "$SOCKS_CHOICE" == "1" ]; then
         echo "🔧 Creating SOCKS5 systemd service for IP $SELECTED_IP..."
@@ -444,7 +374,7 @@ EOF
         chmod 600 "$SOCKS_SERVICE_PATH"
         systemctl daemon-reload
         echo "🚀 Starting SOCKS5 on IP $SELECTED_IP..."
-        systemctl enable --now $SOCKS_SERVICE_NAME
+        systemctl enable --now "$SOCKS_SERVICE_NAME"
     fi
 
 else
@@ -464,7 +394,8 @@ else
 
     if [ "$(yq eval '.outbounds' "$CONFIG_PATH")" = "null" ]; then
         echo "🔧 Adding IP bind (outbounds) to the existing config..."
-        yq -i '.outbounds = [{"name": "ip_outbound", "type": "direct", "direct": {"bindIPv4": "'$SELECTED_IP'"}}]' "$CONFIG_PATH"
+        yq -i ".outbounds = [{\"name\": \"ip_outbound\", \"type\": \"direct\", \
+               \"direct\": {\"bindIPv4\": \"$SELECTED_IP\"}}]" "$CONFIG_PATH"
         yq -i '.acl.inline = ["ip_outbound(all)"]' "$CONFIG_PATH"
     fi
 
@@ -478,7 +409,7 @@ else
     fi
 
     echo "🔄 Restarting Hysteria2 for IP $SELECTED_IP..."
-    systemctl restart $SERVICE_NAME
+    systemctl restart "$SERVICE_NAME"
 
     if [ "$SOCKS_CHOICE" == "1" ]; then
         echo "⚠️ WARNING: SOCKS5 will be overwritten for this IP!"
@@ -500,11 +431,13 @@ WantedBy=multi-user.target
 EOF
         chmod 600 "$SOCKS_SERVICE_PATH"
         systemctl daemon-reload
-        systemctl restart $SOCKS_SERVICE_NAME || systemctl enable --now $SOCKS_SERVICE_NAME
+        systemctl restart "$SOCKS_SERVICE_NAME" || systemctl enable --now "$SOCKS_SERVICE_NAME"
     fi
 fi
 
-ENCODED_PASS=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
+# URL-encode password
+ENCODED_PASS=$(python3 -c \
+    "import urllib.parse; print(urllib.parse.quote('$NEW_PASS', safe=''))")
 HYST_LINK="hysteria2://$NEW_USER:$ENCODED_PASS@$SELECTED_IP:443/?insecure=1"
 
 if [ "$SOCKS_CHOICE" == "1" ]; then
@@ -513,6 +446,7 @@ else
     SOCKS_LINK="-"
 fi
 
+# --- SEND TO GOOGLE SHEETS ---
 if [ -n "$WEBHOOK_URL" ]; then
     echo "📊 Sending data to Google Sheets..."
     SHEET_IP="${SELECTED_IP}:1080"
@@ -570,13 +504,3 @@ if command -v qrencode &> /dev/null; then
 fi
 echo ""
 ```
-
----
-
-## Итог что исправлено
-
-| # | Проблема | Исправление |
-|---|---|---|
-| 1 | `local` переменные внутри цикла | Вынесены до цикла на уровень функции |
-| 2 | `iptables -A` множит правила при рестартах | Заменён на `-C \|\| -A` (идемпотентно) |
-| 3 | `cleanup` удалял только 1 из N дублей iptables | Цикл `while ... -D ... ; do true; done` |
