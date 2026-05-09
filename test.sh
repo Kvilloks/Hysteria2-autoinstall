@@ -138,7 +138,7 @@ select_ip() {
 }
 
 NEW_USER="user$(shuf -i 1000-9999 -n 1)"
-NEW_PASS=$(openssl rand -base64 12)
+NEW_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
 IPS=($(get_all_ips))
 select_ip
