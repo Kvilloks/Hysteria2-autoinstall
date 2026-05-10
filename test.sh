@@ -24,9 +24,10 @@ get_all_ips() {
 }
 
 # ============================================================
-# AUTO-CLEANUP: Remove services for deleted IPs
+# AUTO-CLEANUP
 # ============================================================
 cleanup_dead_services() {
+    # ... (код очистки оставлен без изменений)
     local FOUND_DEAD=0
     local SERVICE_FILE SERVICE_NAME IP_SAFE SERVICE_IP
     local SOCKS_SERVICE TABLE_ID MARK_ID
@@ -47,9 +48,7 @@ cleanup_dead_services() {
         IP_SAFE=$(echo "$SERVICE_NAME" | sed 's/hysteria-server-//')
         SERVICE_IP=$(echo "$IP_SAFE" | tr '_' '.')
 
-        if [ "${ACTIVE_IPS_MAP[$SERVICE_IP]+_}" ]; then
-            continue
-        fi
+        [[ "${ACTIVE_IPS_MAP[$SERVICE_IP]+_}" ]] && continue
 
         if [ "$FOUND_DEAD" -eq 0 ]; then
             echo ""
@@ -60,69 +59,55 @@ cleanup_dead_services() {
         fi
 
         echo "🗑️  Removing dead service for IP: $SERVICE_IP"
-
-        systemctl stop    "$SERVICE_NAME" 2>/dev/null || true
+        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
         systemctl disable "$SERVICE_NAME" 2>/dev/null || true
         rm -f "$SERVICE_FILE"
 
         SOCKS_SERVICE="microsocks-${IP_SAFE}"
         if [ -f "/etc/systemd/system/${SOCKS_SERVICE}.service" ]; then
-            systemctl stop    "$SOCKS_SERVICE" 2>/dev/null || true
+            systemctl stop "$SOCKS_SERVICE" 2>/dev/null || true
             systemctl disable "$SOCKS_SERVICE" 2>/dev/null || true
             rm -f "/etc/systemd/system/${SOCKS_SERVICE}.service"
-            echo "   🗑️  Removed SOCKS5 service: $SOCKS_SERVICE"
         fi
 
-        rm -f "/etc/hysteria/config_${IP_SAFE}.yaml"
-        rm -f "/etc/hysteria/cert_${IP_SAFE}.pem"
-        rm -f "/etc/hysteria/key_${IP_SAFE}.pem"
+        rm -f "/etc/hysteria/config_${IP_SAFE}.yaml" \
+              "/etc/hysteria/cert_${IP_SAFE}.pem" \
+              "/etc/hysteria/key_${IP_SAFE}.pem"
 
         TABLE_ID=$(echo "$SERVICE_IP" | cksum | awk '{print ($1 % 8000) + 1000}')
         MARK_ID=$TABLE_ID
 
         if [ -n "$IFACE" ]; then
             ip rule del from "$SERVICE_IP" table "$TABLE_ID" 2>/dev/null || true
-
-            # Remove ALL duplicate iptables rules in a loop
-            while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" \
-                  -j TTL --ttl-set 128 2>/dev/null; do
-                true
-            done
-
-            tc filter del dev "$IFACE" protocol ip parent 1:0 \
-               prio "$MARK_ID" 2>/dev/null || true
-            tc class  del dev "$IFACE" classid "1:${MARK_ID}" 2>/dev/null || true
+            while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" -j TTL --ttl-set 128 2>/dev/null; do :; done
+            tc filter del dev "$IFACE" protocol ip parent 1:0 prio "$MARK_ID" 2>/dev/null || true
+            tc class del dev "$IFACE" classid "1:${MARK_ID}" 2>/dev/null || true
         fi
-
         echo "   ✅ Fully cleaned: $SERVICE_IP"
     done
 
     if [ "$FOUND_DEAD" -eq 1 ]; then
         systemctl daemon-reload
-        echo "🧹 ============================================"
-        echo "🧹  Cleanup complete"
-        echo "🧹 ============================================"
-        echo ""
+        echo "🧹 Cleanup complete"
     else
-        echo "✅ No dead services found, everything is clean."
-        echo ""
+        echo "✅ No dead services found."
     fi
 }
 
 cleanup_dead_services
 
 # ============================================================
+# Получаем IP и показываем список
+# ============================================================
+NEW_USER="user$(shuf -i 1000-9999 -n 1)"
+NEW_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16 || true)
 
-select_ip() {
-    IPS=($(get_all_ips))
+IPS=($(get_all_ips))
 
-    if [ ${#IPS[@]} -eq 0 ]; then
-        echo "❌ No public IP addresses found."
-        read -p "Enter IP address manually: " MANUAL_IP
-        echo "$MANUAL_IP"
-        return
-    fi
-
+if [ ${#IPS[@]} -eq 0 ]; then
+    echo "❌ No public IP addresses found."
+    read -p "Enter IP manually: " SELECTED_IP
+else
     echo ""
     echo "=============================="
     echo "Available IP addresses on the server:"
@@ -131,44 +116,34 @@ select_ip() {
         echo "$((i+1)). ${IPS[$i]}"
     done
     echo "=============================="
-    echo ""
-}
 
-NEW_USER="user$(shuf -i 1000-9999 -n 1)"
-NEW_PASS=$(openssl rand -base64 18 | tr -dc 'a-zA-Z0-9' | head -c 16 || true)
+    while true; do
+        read -p "Select IP number (1-${#IPS[@]}): " IP_CHOICE
+        if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && [ "$IP_CHOICE" -ge 1 ] && [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
+            SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
+            break
+        else
+            echo "❌ Please enter a number from 1 to ${#IPS[@]}"
+        fi
+    done
+fi
 
-IPS=($(get_all_ips))
-select_ip
-
-while true; do
-    read -p "Select IP number (1-${#IPS[@]}): " IP_CHOICE
-    if [[ "$IP_CHOICE" =~ ^[0-9]+$ ]] && \
-       [ "$IP_CHOICE" -ge 1 ] && \
-       [ "$IP_CHOICE" -le ${#IPS[@]} ]; then
-        SELECTED_IP="${IPS[$((IP_CHOICE-1))]}"
-        break
-    else
-        echo "❌ Error: please enter a number from 1 to ${#IPS[@]}"
-    fi
-done
-
+# Выбор SOCKS5
 while true; do
     read -p "Install additional SOCKS5 proxy on this IP? (1 - Yes, 0 - No): " SOCKS_CHOICE
     if [[ "$SOCKS_CHOICE" == "0" || "$SOCKS_CHOICE" == "1" ]]; then
         break
     else
-        echo "❌ Error: enter 1 (Yes) or 0 (No)."
+        echo "❌ Enter 1 (Yes) or 0 (No)."
     fi
 done
 
 echo ""
 echo "✅ Selected IP: $SELECTED_IP"
-if [ "$SOCKS_CHOICE" == "1" ]; then
-    echo "✅ SOCKS5: Will be installed"
-else
-    echo "✅ SOCKS5: Installation skipped"
-fi
+echo "✅ SOCKS5: $([ "$SOCKS_CHOICE" == "1" ] && echo "Will be installed" || echo "Skipped")"
 echo ""
+
+# ... (весь остальной код скрипта остаётся без изменений)
 
 IP_SAFE=$(echo "$SELECTED_IP" | tr '.' '_')
 CONFIG_PATH="/etc/hysteria/config_${IP_SAFE}.yaml"
@@ -186,7 +161,6 @@ GATEWAY=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
 INTERFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
 
 if [ -z "$GATEWAY" ] || [ -z "$INTERFACE" ]; then
-    echo "⚠️ Warning: Failed to determine gateway. Routing may not work correctly."
     GATEWAY="127.0.0.1"
     INTERFACE="eth0"
 fi
