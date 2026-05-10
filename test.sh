@@ -1,6 +1,3 @@
-Да, вот финальный скрипт со всеми исправлениями включая `modprobe`, `flock` для tc, и все предыдущие фиксы:
-
-```bash
 #!/bin/bash
 
 set -e
@@ -503,4 +500,3 @@ if command -v qrencode &> /dev/null; then
     echo ""
 fi
 echo ""
-```
