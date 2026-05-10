@@ -23,6 +23,79 @@ get_all_ips() {
     ip addr show | grep "inet " | grep -v "127.0.0.1" | awk '{print $2}' | cut -d'/' -f1
 }
 
+# ============================================================
+# AUTO-CLEANUP
+# ============================================================
+cleanup_dead_services() {
+    local FOUND_DEAD=0
+    local SERVICE_FILE SERVICE_NAME IP_SAFE SERVICE_IP
+    local SOCKS_SERVICE TABLE_ID MARK_ID
+    local GW IFACE
+
+    declare -A ACTIVE_IPS_MAP
+    while IFS= read -r ip; do
+        ACTIVE_IPS_MAP["$ip"]=1
+    done < <(get_all_ips)
+
+    GW=$(ip route show | grep "^default" | awk '{print $3}' | head -1)
+    IFACE=$(ip route show | grep "^default" | awk '{print $5}' | head -1)
+
+    for SERVICE_FILE in /etc/systemd/system/hysteria-server-*.service; do
+        [ -f "$SERVICE_FILE" ] || continue
+
+        SERVICE_NAME=$(basename "$SERVICE_FILE" .service)
+        IP_SAFE=$(echo "$SERVICE_NAME" | sed 's/hysteria-server-//')
+        SERVICE_IP=$(echo "$IP_SAFE" | tr '_' '.')
+
+        [[ "${ACTIVE_IPS_MAP[$SERVICE_IP]+_}" ]] && continue
+
+        if [ "$FOUND_DEAD" -eq 0 ]; then
+            echo ""
+            echo "🧹 ============================================"
+            echo "🧹  CLEANUP: Found services for removed IPs"
+            echo "🧹 ============================================"
+            FOUND_DEAD=1
+        fi
+
+        echo "🗑️  Removing dead service for IP: $SERVICE_IP"
+        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+        systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+        rm -f "$SERVICE_FILE"
+
+        SOCKS_SERVICE="microsocks-${IP_SAFE}"
+        if [ -f "/etc/systemd/system/${SOCKS_SERVICE}.service" ]; then
+            systemctl stop "$SOCKS_SERVICE" 2>/dev/null || true
+            systemctl disable "$SOCKS_SERVICE" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${SOCKS_SERVICE}.service"
+        fi
+
+        rm -f "/etc/hysteria/config_${IP_SAFE}.yaml" \
+              "/etc/hysteria/cert_${IP_SAFE}.pem" \
+              "/etc/hysteria/key_${IP_SAFE}.pem"
+
+        TABLE_ID=$(echo "$SERVICE_IP" | cksum | awk '{print ($1 % 8000) + 1000}')
+        MARK_ID=$TABLE_ID
+
+        if [ -n "$IFACE" ]; then
+            ip rule del from "$SERVICE_IP" table "$TABLE_ID" 2>/dev/null || true
+            while iptables -t mangle -D POSTROUTING -s "$SERVICE_IP" -j TTL --ttl-set 128 2>/dev/null; do :; done
+            tc filter del dev "$IFACE" protocol ip parent 1:0 prio "$MARK_ID" 2>/dev/null || true
+            tc class del dev "$IFACE" classid "1:${MARK_ID}" 2>/dev/null || true
+        fi
+        echo "   ✅ Fully cleaned: $SERVICE_IP"
+    done
+
+    if [ "$FOUND_DEAD" -eq 1 ]; then
+        systemctl daemon-reload
+        echo "🧹 Cleanup complete"
+    else
+        echo "✅ No dead services found."
+    fi
+}
+
+cleanup_dead_services
+
+
 select_ip() {
     IPS=($(get_all_ips))
     
